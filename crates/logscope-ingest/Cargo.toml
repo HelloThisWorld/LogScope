@@ -1,0 +1,23 @@
+[package]
+name = "logscope-ingest"
+description = "Source adapters and Import Profiles: streaming CSV/JSONL/text readers with provenance"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+logscope-model.workspace = true
+logscope-normalize.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+csv.workspace = true
+flate2.workspace = true
+encoding_rs.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+zip = { version = "8.6.0", default-features = false, features = ["deflate", "deflate64"] }
+
+[dev-dependencies]
+tempfile.workspace = true

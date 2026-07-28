@@ -1,0 +1,28 @@
+[package]
+name = "logscope-otlp"
+description = "EXPERIMENTAL OTLP compatibility spike: HTTP protobuf/JSON, gRPC, JSONL file import"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+logscope-model.workspace = true
+logscope-normalize.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
+opentelemetry-proto = { version = "0.32.0", features = ["gen-tonic", "with-serde", "logs", "metrics", "trace"] }
+tonic = "0.14.6"
+prost = "0.14.4"
+tonic-prost = "0.14.6"
+axum = "0.8.9"
+bytes = "1.12.1"
+http = "1.4.2"
+
+[dev-dependencies]
+reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
+tempfile.workspace = true

@@ -1,0 +1,14 @@
+[package]
+name = "logscope-testsupport"
+description = "Test support: golden fixture access, deterministic corpus generators, benchmark helpers"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+logscope-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+rand = "0.10.2"
+rand_chacha = "0.10.0"

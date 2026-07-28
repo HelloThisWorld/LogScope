@@ -1,0 +1,16 @@
+[package]
+name = "logscope-jobs"
+description = "Background job abstraction: progress, pause, cancellation, structured failure"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
