@@ -87,14 +87,13 @@ fn create_workspace(
 ) -> CmdResult<WorkspaceInfoDto> {
     let mut slot = state.workspace.lock();
     if slot.is_some() || state.import_running.load(Ordering::SeqCst) {
-        return Err(ErrorDto::new("workspace/busy", "close the current workspace first"));
+        return Err(ErrorDto::new(
+            "workspace/busy",
+            "close the current workspace first",
+        ));
     }
-    let ws = Workspace::create(
-        &PathBuf::from(&path),
-        &name,
-        logscope_app::PRODUCT_VERSION,
-    )
-    .map_err(ws_err)?;
+    let ws = Workspace::create(&PathBuf::from(&path), &name, logscope_app::PRODUCT_VERSION)
+        .map_err(ws_err)?;
     let info = workspace_info(&ws, false);
     remember_recent(&app, &info.root);
     *slot = Some(ws);
@@ -109,10 +108,13 @@ fn open_workspace(
 ) -> CmdResult<WorkspaceInfoDto> {
     let mut slot = state.workspace.lock();
     if slot.is_some() || state.import_running.load(Ordering::SeqCst) {
-        return Err(ErrorDto::new("workspace/busy", "close the current workspace first"));
+        return Err(ErrorDto::new(
+            "workspace/busy",
+            "close the current workspace first",
+        ));
     }
-    let ws = Workspace::open(&PathBuf::from(&path), logscope_app::PRODUCT_VERSION)
-        .map_err(ws_err)?;
+    let ws =
+        Workspace::open(&PathBuf::from(&path), logscope_app::PRODUCT_VERSION).map_err(ws_err)?;
     let info = workspace_info(&ws, true);
     remember_recent(&app, &info.root);
     *slot = Some(ws);
@@ -142,7 +144,10 @@ fn overview(state: State<'_, AppState>) -> CmdResult<OverviewDto> {
     })?;
     let mut datasets = Vec::new();
     for d in ws.meta.list_datasets().map_err(ws_err)? {
-        let segments = ws.meta.segments_for_dataset(&d.dataset_id).map_err(ws_err)?;
+        let segments = ws
+            .meta
+            .segments_for_dataset(&d.dataset_id)
+            .map_err(ws_err)?;
         datasets.push(DatasetDto {
             dataset_id: d.dataset_id,
             name: d.name,
@@ -183,7 +188,10 @@ fn start_import(
     request: StartImportDto,
 ) -> CmdResult<String> {
     if request.paths.is_empty() {
-        return Err(ErrorDto::new("import/invalid-argument", "no files selected"));
+        return Err(ErrorDto::new(
+            "import/invalid-argument",
+            "no files selected",
+        ));
     }
     let profile = match request.format.as_str() {
         "jsonl" => builtin::jsonl_generic(),
@@ -229,7 +237,10 @@ fn start_import(
         let outcome = run_import(&mut ws, &engine, &import_request, ctx);
         Ok::<_, logscope_jobs::JobError>((outcome, ws))
     });
-    state.jobs.lock().insert(job_id.clone(), handle.control.clone());
+    state
+        .jobs
+        .lock()
+        .insert(job_id.clone(), handle.control.clone());
 
     // Watcher restores the workspace when the job finishes.
     let watcher_app = app.clone();
@@ -289,8 +300,7 @@ fn query_logs(state: State<'_, AppState>, request: LogQueryDto) -> CmdResult<Log
     for id in &dataset_ids {
         files.extend(ws.segment_paths(id).map_err(ws_err)?);
     }
-    let fts = FtsIndex::open(&ws.layout.fts_logs_path())
-        .map_err(|e| ErrorDto::new(e.code(), e))?;
+    let fts = FtsIndex::open(&ws.layout.fts_logs_path()).map_err(|e| ErrorDto::new(e.code(), e))?;
 
     let engine = state.engine.lock();
     let cancel = QueryCancelHandle::new(engine.interrupt_handle());
@@ -341,8 +351,8 @@ fn use_bundled_webview2_if_present() {
         if let Some(dir) = exe.parent() {
             let fixed = dir.join("webview2");
             if fixed.join("msedgewebview2.exe").exists() {
-                // SAFETY: called before any threads are spawned.
-                unsafe { std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", &fixed) };
+                // Called before any threads are spawned (edition 2021).
+                std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", &fixed);
             }
         }
     }
@@ -353,8 +363,7 @@ fn main() {
     use_bundled_webview2_if_present();
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 

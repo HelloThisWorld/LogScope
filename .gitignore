@@ -12,6 +12,9 @@ apps/desktop/dist/
 /tmp-workspaces/
 *.tmp-workspace/
 
+# Portable archives and packaging staging (build outputs, never commit)
+/dist-portable/
+
 # Local tool state
 *.local
 .DS_Store

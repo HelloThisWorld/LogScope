@@ -12,7 +12,7 @@
 
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use logscope_app::{run_import, ImportRequest};
 use logscope_ingest::builtin;
@@ -40,7 +40,10 @@ fn main() {
         .get(2)
         .and_then(|s| s.parse().ok())
         .unwrap_or(1_000_000);
-    let seed: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(20_260_729);
+    let seed: u64 = args
+        .get(3)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20_260_729);
 
     let bench_root = std::env::temp_dir().join(format!("logscope-bench-{}", std::process::id()));
     std::fs::create_dir_all(&bench_root).expect("create bench dir");
@@ -241,8 +244,12 @@ fn import_otlp_stream(
 ) -> (String, u64, Option<String>) {
     let job_id = format!("job-{}", uuid::Uuid::new_v4());
     let dataset_id = format!("ds-{}", uuid::Uuid::new_v4());
-    ws.meta.insert_job(&job_id, "bench", Some(&dataset_id)).unwrap();
-    ws.meta.create_dataset(&dataset_id, dataset_name, signal).unwrap();
+    ws.meta
+        .insert_job(&job_id, "bench", Some(&dataset_id))
+        .unwrap();
+    ws.meta
+        .create_dataset(&dataset_id, dataset_name, signal)
+        .unwrap();
     let staging = ws.begin_staging(&job_id).unwrap();
 
     let mut metric_writer: Option<(String, MetricSegmentWriter, PathBuf)> = None;
@@ -314,8 +321,7 @@ fn import_otlp_stream(
                     let batch = convert_traces(req, &ctx);
                     assert!(batch.rejects.is_empty());
                     if first_trace.is_none() {
-                        first_trace =
-                            batch.spans.first().map(|s| s.trace_id.as_str().to_string());
+                        first_trace = batch.spans.first().map(|s| s.trace_id.as_str().to_string());
                     }
                     if span_writer.is_none() {
                         let segment_id = format!("seg-{}", uuid::Uuid::new_v4());
@@ -408,8 +414,7 @@ fn bench_metrics(root: &Path, count: u64, seed: u64) -> serde_json::Value {
     let t_gen = Instant::now();
     let shape = {
         let f = std::fs::File::create(&corpus).unwrap();
-        write_metrics_otlp_jsonl(BufWriter::with_capacity(1 << 20, f), count, 10_000, seed)
-            .unwrap()
+        write_metrics_otlp_jsonl(BufWriter::with_capacity(1 << 20, f), count, 10_000, seed).unwrap()
     };
     println!(
         "generated {} envelopes / {} points / {:.1} MiB in {:.1}s",
@@ -421,7 +426,8 @@ fn bench_metrics(root: &Path, count: u64, seed: u64) -> serde_json::Value {
 
     let mut ws = Workspace::create(&root.join("ws-metrics"), "bench", "0.0.0").unwrap();
     let t_import = Instant::now();
-    let (dataset_id, rows, _) = import_otlp_stream(&mut ws, &corpus, Signal::Metrics, "bench metrics");
+    let (dataset_id, rows, _) =
+        import_otlp_stream(&mut ws, &corpus, Signal::Metrics, "bench metrics");
     let import_secs = t_import.elapsed().as_secs_f64();
     let disk = dataset_disk_bytes(&ws, &dataset_id);
     println!(

@@ -62,10 +62,7 @@ pub fn write_metrics_otlp_jsonl(
                         "pod",
                         any_value::Value::StringValue(format!("pod-{series:05}")),
                     ),
-                    kv(
-                        "shard",
-                        any_value::Value::IntValue((series % 16) as i64),
-                    ),
+                    kv("shard", any_value::Value::IntValue((series % 16) as i64)),
                 ],
                 start_time_unix_nano: base,
                 time_unix_nano: base + idx * 1_000_000,
@@ -111,8 +108,7 @@ pub fn write_metrics_otlp_jsonl(
                             metadata: vec![],
                             data: Some(pbm::metric::Data::Sum(pbm::Sum {
                                 data_points: sum_points,
-                                aggregation_temporality:
-                                    pbm::AggregationTemporality::Delta as i32,
+                                aggregation_temporality: pbm::AggregationTemporality::Delta as i32,
                                 is_monotonic: true,
                             })),
                         },

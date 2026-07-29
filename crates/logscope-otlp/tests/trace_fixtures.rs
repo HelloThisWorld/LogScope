@@ -91,7 +91,11 @@ fn problem_spans_convert_without_fabrication() {
     assert_eq!(incomplete.duration_nanos(), None);
 
     // Orphan parent reference is preserved exactly as sent.
-    let orphan = batch.spans.iter().find(|s| s.name == "orphan-child").unwrap();
+    let orphan = batch
+        .spans
+        .iter()
+        .find(|s| s.name == "orphan-child")
+        .unwrap();
     assert_eq!(
         orphan.parent_span_id.as_ref().map(|s| s.as_str()),
         Some("9999999900000000")

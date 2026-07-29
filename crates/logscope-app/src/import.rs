@@ -63,7 +63,10 @@ fn job_err(code: &str, e: impl std::fmt::Display) -> JobError {
 /// Compact 16-byte dedup key from a `xxx-<32 hex>` record ID, keeping the
 /// in-job duplicate set bounded (~48 bytes/record instead of ~100).
 fn record_id_key(record_id: &str) -> [u8; 16] {
-    let hex = record_id.split_once('-').map(|(_, h)| h).unwrap_or(record_id);
+    let hex = record_id
+        .split_once('-')
+        .map(|(_, h)| h)
+        .unwrap_or(record_id);
     let mut key = [0u8; 16];
     if hex.len() == 32 {
         let bytes = hex.as_bytes();

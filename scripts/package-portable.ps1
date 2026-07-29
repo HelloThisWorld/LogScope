@@ -98,7 +98,8 @@ $manifest = [ordered]@{
     installer        = $false
     signed           = $false
     webview2         = $webview2State
-    built_at_utc     = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    # Derived from the executable so identical inputs -> identical archive.
+    built_at_utc     = (Get-Item $exe).LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
     files            = $entries
 }
 $manifestPath = Join-Path $stageDir "package-manifest.json"

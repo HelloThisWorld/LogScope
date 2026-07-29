@@ -102,7 +102,10 @@ fn nodejs_numeric_levels_are_preserved_not_guessed() {
         .provenance
         .flags
         .contains(&QualityFlag::TimestampUnparsed));
-    assert_eq!(first.original_timestamp_text.as_deref(), Some("1717236000123"));
+    assert_eq!(
+        first.original_timestamp_text.as_deref(),
+        Some("1717236000123")
+    );
     assert_eq!(first.display_message, "server listening");
 }
 
@@ -168,9 +171,7 @@ fn generic_csv_fixture_with_quoted_newline_normalizes() {
         }
         for item in batch {
             match item {
-                ReadItem::Parsed(p) => {
-                    records.push(normalize_log(p, &profile, &context).unwrap())
-                }
+                ReadItem::Parsed(p) => records.push(normalize_log(p, &profile, &context).unwrap()),
                 ReadItem::Malformed(m) => panic!("unexpected malformed: {m:?}"),
             }
         }
