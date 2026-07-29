@@ -19,8 +19,11 @@ use logscope_store::FtsIndex;
 use crate::error::QueryError;
 
 /// FTS candidate bound: above this many hits for one text predicate the
-/// compiler switches that predicate to the (exact, slower) regex scan.
-pub const MAX_FTS_CANDIDATES: usize = 100_000;
+/// compiler switches that predicate to the exact regex scan. Measured on
+/// the 1M corpus (2026-07-29): candidate materialization beats the scan
+/// only for selective terms — beyond ~20k hits the bounded scan is faster
+/// (265 ms vs 1.09 s at 57k candidates), so the cutoff sits there.
+pub const MAX_FTS_CANDIDATES: usize = 20_000;
 
 /// How one free-text predicate was executed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

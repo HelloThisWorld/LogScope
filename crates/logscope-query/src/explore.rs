@@ -874,6 +874,54 @@ pub fn query_source_context(
     })
 }
 
+/// Streams the complete ordered result (bounded by `max_rows`) row by row
+/// under the shared filter — the export path. Rows arrive in exactly the
+/// table's total order; `on_row` returns `false` to stop early (byte caps).
+/// The result set is never materialized on this side; DuckDB manages the
+/// sort internally.
+#[allow(clippy::too_many_arguments)]
+pub fn stream_query(
+    engine: &EngineConnection,
+    files: &[PathBuf],
+    filter: &CompiledFilter,
+    window: &ResolvedWindow,
+    max_rows: u64,
+    cancel: &QueryCancelHandle,
+    budget: Duration,
+    mut on_row: impl FnMut(LogRow) -> Result<bool, QueryError>,
+) -> Result<u64, QueryError> {
+    if files.is_empty() {
+        return Ok(0);
+    }
+    let mut params: Vec<Value> = Vec::new();
+    let win = window_sql(window, &mut params);
+    params.extend(filter.params.iter().cloned());
+    let sql = format!(
+        "SELECT {LOG_COLUMNS} FROM {files} WHERE {win} AND {expr} {ORDER_FORWARD} LIMIT {fetch}",
+        files = files_expr(files),
+        expr = filter.where_sql,
+        fetch = max_rows.min(i64::MAX as u64),
+    );
+    run_bounded(cancel, budget, || {
+        let conn = engine.raw();
+        let _guard = install_temp_tables(conn, filter)?;
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query(duckdb::params_from_iter(params.iter()))?;
+        let mut n = 0u64;
+        while let Some(row) = rows.next()? {
+            if n.is_multiple_of(1024) && cancel.was_cancelled() {
+                return Err(QueryError::Cancelled);
+            }
+            let mapped = map_log_row(row)?;
+            if !on_row(mapped)? {
+                break;
+            }
+            n += 1;
+        }
+        Ok(n)
+    })
+}
+
 /// Full-detail record: the hot row plus the cold columns the detail panel
 /// distinguishes (typed body, scope, timestamp provenance).
 #[derive(Debug, Clone, Serialize, Deserialize)]

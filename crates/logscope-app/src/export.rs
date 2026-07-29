@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use logscope_jobs::{JobContext, JobError, JobProgress};
 use logscope_model::{attrs_from_canonical_json, UnixNanos};
 use logscope_query::{
-    query_page, CompiledFilter, EngineConnection, LogRow, PageRequest, QueryCancelHandle,
+    stream_query, CompiledFilter, EngineConnection, LogRow, QueryCancelHandle, QueryError,
     ResolvedWindow,
 };
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,6 @@ pub const MAX_EXPORT_ROWS: u64 = 10_000_000;
 pub const MAX_EXPORT_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 pub const DEFAULT_EXPORT_ROWS: u64 = 1_000_000;
 pub const DEFAULT_EXPORT_BYTES: u64 = 1024 * 1024 * 1024;
-const PAGE_SIZE: u32 = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -312,44 +311,56 @@ fn write_export(
         bytes_written += header.len() as u64;
     }
 
+    // One streaming ordered scan (identical ORDER/filter to the table);
+    // fetching `row_limit + 1` makes hitting the row cap detectable.
+    if ctx.control.is_cancel_requested() {
+        return Err(JobError::new("job/cancelled", "the export was cancelled"));
+    }
     let cancel = QueryCancelHandle::new(engine.interrupt_handle());
-    let mut cursor: Option<String> = None;
-    'pages: loop {
-        if ctx.control.is_cancel_requested() {
-            return Err(JobError::new("job/cancelled", "the export was cancelled"));
-        }
-        let page = query_page(
-            engine,
-            files,
-            filter,
-            window,
-            &PageRequest {
-                cursor: cursor.clone(),
-                backward: false,
-                limit: PAGE_SIZE,
-            },
-            &cancel,
-            None,
-        )
-        .map_err(|e| JobError::new(e.code(), e.to_string()))?;
-        if page.rows.is_empty() {
-            break;
-        }
-        for row in &page.rows {
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let watcher = {
+        let control = ctx.control.clone();
+        let cancel = cancel.clone();
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                if control.is_cancel_requested() {
+                    cancel.cancel();
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        })
+    };
+    let mut write_error: Option<JobError> = None;
+    let stream_result = stream_query(
+        engine,
+        files,
+        filter,
+        window,
+        row_limit + 1,
+        &cancel,
+        std::time::Duration::from_secs(24 * 3600),
+        |row| {
             if rows_written >= row_limit {
                 truncated = true;
-                break 'pages;
+                return Ok(false);
             }
             let line = match spec.format {
-                ExportFormat::Jsonl => {
-                    let mut l = jsonl_line(row)?;
-                    l.push('\n');
-                    l
-                }
+                ExportFormat::Jsonl => match jsonl_line(&row) {
+                    Ok(mut l) => {
+                        l.push('\n');
+                        l
+                    }
+                    Err(e) => {
+                        write_error = Some(e);
+                        return Ok(false);
+                    }
+                },
                 ExportFormat::Csv => {
                     let mut l = columns
                         .iter()
-                        .map(|c| csv_escape(&csv_cell(row, c, spec.csv_formula_guard)))
+                        .map(|c| csv_escape(&csv_cell(&row, c, spec.csv_formula_guard)))
                         .collect::<Vec<_>>()
                         .join(",");
                     l.push('\n');
@@ -359,23 +370,43 @@ fn write_export(
             // A record is either written completely or not at all.
             if bytes_written + line.len() as u64 > byte_limit {
                 truncated = true;
-                break 'pages;
+                return Ok(false);
             }
-            out.write_all(line.as_bytes()).map_err(io_err)?;
+            if let Err(e) = out.write_all(line.as_bytes()) {
+                write_error = Some(JobError::new("export/io", e.to_string()).retryable());
+                return Ok(false);
+            }
             bytes_written += line.len() as u64;
             rows_written += 1;
-        }
-        ctx.report(JobProgress {
-            stage: "exporting".into(),
-            records_accepted: rows_written,
-            bytes_processed: bytes_written,
-            ..Default::default()
-        });
-        if !page.has_more {
-            break;
-        }
-        cursor = page.next_cursor;
+            if rows_written.is_multiple_of(10_000) {
+                ctx.report(JobProgress {
+                    stage: "exporting".into(),
+                    records_accepted: rows_written,
+                    bytes_processed: bytes_written,
+                    ..Default::default()
+                });
+            }
+            Ok(true)
+        },
+    );
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = watcher.join();
+    if let Some(e) = write_error {
+        return Err(e);
     }
+    match stream_result {
+        Ok(_) => {}
+        Err(QueryError::Cancelled) => {
+            return Err(JobError::new("job/cancelled", "the export was cancelled"))
+        }
+        Err(e) => return Err(JobError::new(e.code(), e.to_string())),
+    }
+    ctx.report(JobProgress {
+        stage: "exporting".into(),
+        records_accepted: rows_written,
+        bytes_processed: bytes_written,
+        ..Default::default()
+    });
 
     out.flush().map_err(io_err)?;
     out.get_ref().sync_all().map_err(io_err)?;
