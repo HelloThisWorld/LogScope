@@ -1,9 +1,17 @@
 name: CI
 
+# Feature branches get CI through their pull request only; direct pushes
+# trigger CI on the default branches. This avoids running every job twice
+# (push + pull_request) for the same commit.
 on:
   push:
-    branches: [main, master, "feature/**"]
+    branches: [main, master]
   pull_request:
+
+# A newer push to the same branch/PR supersedes the previous run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,6 +27,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
       - run: cargo fmt --check
       - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
 
@@ -29,6 +41,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
       - run: cargo test --workspace --exclude logscope-desktop
 
   core-linux:
@@ -38,6 +54,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
       # Platform-neutral core: model, normalization, jobs, workspace,
       # ingest, storage. (DuckDB-dependent query tests run on the desktop
       # OS jobs to keep this job fast.)
@@ -52,6 +72,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -73,6 +97,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
