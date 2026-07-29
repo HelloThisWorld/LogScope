@@ -313,6 +313,98 @@ pub fn rebuild_fts_to_current(
     Ok(indexed)
 }
 
+/// Referenced-source availability for the detail/context view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceStatus {
+    Available,
+    Changed,
+    Missing,
+    Unsupported,
+}
+
+impl SourceStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SourceStatus::Available => "available",
+            SourceStatus::Changed => "changed",
+            SourceStatus::Missing => "missing",
+            SourceStatus::Unsupported => "unsupported",
+        }
+    }
+}
+
+/// Maximum raw excerpt returned to the UI.
+pub const MAX_RAW_EXCERPT_BYTES: u64 = 64 * 1024;
+/// Decompression skip bound for gzip members.
+const MAX_GZ_SKIP_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Reads the exact raw bytes of one record from its referenced source file.
+/// Never modifies the file; never fabricates content: a changed or missing
+/// file yields a status and no excerpt (canonical neighbors still exist).
+/// Change detection is size-based in v0.2 (documented).
+pub fn read_raw_excerpt(
+    ws: &Workspace,
+    file_id: &str,
+    byte_start: Option<u64>,
+    byte_end: Option<u64>,
+) -> (SourceStatus, Option<String>, Option<String>) {
+    use std::io::Read;
+
+    let Ok(Some(file_row)) = ws.meta.get_source_file(file_id) else {
+        return (SourceStatus::Missing, None, None);
+    };
+    let path = std::path::PathBuf::from(&file_row.path);
+    let display_path = Some(file_row.path.clone());
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return (SourceStatus::Missing, None, display_path);
+    };
+    if meta.len() as i64 != file_row.size_bytes {
+        return (SourceStatus::Changed, None, display_path);
+    }
+    let (Some(start), Some(end)) = (byte_start, byte_end) else {
+        return (SourceStatus::Available, None, display_path);
+    };
+    if end <= start || end - start > MAX_RAW_EXCERPT_BYTES || start > MAX_GZ_SKIP_BYTES {
+        return (SourceStatus::Unsupported, None, display_path);
+    }
+    let Ok(file) = std::fs::File::open(&path) else {
+        return (SourceStatus::Missing, None, display_path);
+    };
+    let is_gz = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("gz"));
+    let mut reader: Box<dyn Read> = if is_gz {
+        Box::new(flate2::read::MultiGzDecoder::new(file))
+    } else {
+        Box::new(file)
+    };
+    // Offsets refer to the decompressed stream (reader-side counting).
+    let mut to_skip = start;
+    let mut scratch = [0u8; 64 * 1024];
+    while to_skip > 0 {
+        let step = scratch.len().min(to_skip as usize);
+        match reader.read(&mut scratch[..step]) {
+            Ok(0) => return (SourceStatus::Changed, None, display_path),
+            Ok(n) => to_skip -= n as u64,
+            Err(_) => return (SourceStatus::Changed, None, display_path),
+        }
+    }
+    let len = (end - start) as usize;
+    let mut buf = vec![0u8; len];
+    let mut filled = 0;
+    while filled < len {
+        match reader.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(_) => return (SourceStatus::Changed, None, display_path),
+        }
+    }
+    buf.truncate(filled);
+    let text = String::from_utf8_lossy(&buf).to_string();
+    (SourceStatus::Available, Some(text), display_path)
+}
+
 /// Marks the derived-index states for a freshly imported dataset (called
 /// after atomic publication inside the import job).
 pub fn note_new_dataset_indexes(ws: &Workspace, dataset_id: &str) -> Result<(), WorkspaceError> {

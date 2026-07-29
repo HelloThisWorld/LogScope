@@ -1,12 +1,12 @@
-// LogScope v0.0 proof shell: create/open a workspace, run the proof
-// import/query path, watch job progress, cancel, close, reopen.
-// This is intentionally not the v0.2 Log Explorer.
+// LogScope shell: workspace lifecycle, import, and the entry into the
+// v0.2 Log Explorer.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api, errorText } from "./api";
-import type { LogPageDto, OverviewDto, WorkspaceInfoDto } from "./api";
+import type { OverviewDto, WorkspaceInfoDto } from "./api";
+import Explorer from "./Explorer";
 
 type JobEventPayload = {
   event: "started" | "progress" | "finished";
@@ -36,14 +36,12 @@ export default function App() {
 
   const [importPaths, setImportPaths] = useState<string[]>([]);
   const [importName, setImportName] = useState("imported logs");
-  const [importFormat, setImportFormat] = useState<"jsonl" | "csv">("jsonl");
+  const [importFormat, setImportFormat] = useState<
+    "jsonl" | "csv" | "elasticsearch"
+  >("jsonl");
   const [activeJob, setActiveJob] = useState<string | null>(null);
   const [jobLine, setJobLine] = useState<string>("");
-
-  const [searchText, setSearchText] = useState("");
-  const [minSeverity, setMinSeverity] = useState<string>("");
-  const [offset, setOffset] = useState(0);
-  const [page, setPage] = useState<LogPageDto | null>(null);
+  const [view, setView] = useState<"home" | "explorer">("home");
   const importFinishedRef = useRef<() => void>(() => {});
 
   const refreshOverview = useCallback(async () => {
@@ -138,7 +136,7 @@ export default function App() {
       await api.closeWorkspace();
       setWorkspace(null);
       setOverview(null);
-      setPage(null);
+      setView("home");
       setStatus("workspace closed");
     });
 
@@ -171,25 +169,26 @@ export default function App() {
       if (activeJob) await api.cancelJob(activeJob);
     });
 
-  const runQuery = (nextOffset = 0) =>
-    guard(async () => {
-      const result = await api.queryLogs({
-        dataset_ids: [],
-        time_start: null,
-        time_end: null,
-        min_severity: minSeverity ? Number(minSeverity) : null,
-        contains_text: searchText || null,
-        limit: 50,
-        offset: nextOffset,
-      });
-      setOffset(nextOffset);
-      setPage(result);
-    });
+  if (view === "explorer" && workspace && overview) {
+    return (
+      <main className="main-wide">
+        {error && <div className="error">{error}</div>}
+        <Explorer
+          overview={overview}
+          onBack={() => {
+            setView("home");
+            void refreshOverview();
+          }}
+          onOpenImport={() => setView("home")}
+        />
+      </main>
+    );
+  }
 
   return (
     <main>
       <h1>LogScope</h1>
-      <p className="subtitle">v0.0 offline architecture proof — not the Log Explorer</p>
+      <p className="subtitle">offline log investigation</p>
       {error && <div className="error">{error}</div>}
       {status && <div className="status">{status}</div>}
 
@@ -238,6 +237,16 @@ export default function App() {
                 schema v{workspace.schema_version.toString()} · signals:{" "}
                 {workspace.available_signals.join(", ") || "none yet"}
               </span>
+              <button
+                onClick={() => setView("explorer")}
+                disabled={
+                  !overview?.datasets.some(
+                    (d) => d.signal === "logs" && d.status === "published",
+                  ) || !!activeJob
+                }
+              >
+                Explore logs
+              </button>
               <button onClick={doClose}>Close workspace</button>
               <button onClick={refreshOverview}>Refresh</button>
             </div>
@@ -287,10 +296,18 @@ export default function App() {
               />
               <select
                 value={importFormat}
-                onChange={(e) => setImportFormat(e.target.value as "jsonl" | "csv")}
+                aria-label="Import profile"
+                onChange={(e) =>
+                  setImportFormat(
+                    e.target.value as "jsonl" | "csv" | "elasticsearch",
+                  )
+                }
               >
-                <option value="jsonl">JSON lines</option>
+                <option value="jsonl">JSON lines (generic)</option>
                 <option value="csv">CSV (with headers)</option>
+                <option value="elasticsearch">
+                  Elasticsearch export (JSONL, ECS)
+                </option>
               </select>
               <button onClick={doImport} disabled={!importPaths.length || !!activeJob}>
                 Start import
@@ -302,62 +319,6 @@ export default function App() {
             {jobLine && <div className="jobline">{jobLine}</div>}
           </section>
 
-          <section>
-            <h2>Query (proof path)</h2>
-            <div className="row">
-              <input
-                placeholder="full-text search"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-              />
-              <select
-                value={minSeverity}
-                onChange={(e) => setMinSeverity(e.target.value)}
-              >
-                <option value="">any severity</option>
-                <option value="9">INFO and above</option>
-                <option value="13">WARN and above</option>
-                <option value="17">ERROR and above</option>
-              </select>
-              <button onClick={() => runQuery(0)}>Run query</button>
-            </div>
-            {page && (
-              <>
-                <div className="row dim">
-                  {page.rows.length} rows (limit {page.limit}, offset {offset})
-                  <button disabled={offset === 0} onClick={() => runQuery(Math.max(0, offset - page.limit))}>
-                    Prev
-                  </button>
-                  <button disabled={!page.has_more} onClick={() => runQuery(offset + page.limit)}>
-                    Next
-                  </button>
-                </div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Severity</th>
-                      <th>Message</th>
-                      <th>Locator</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {page.rows.map((r) => (
-                      <tr key={r.record_id}>
-                        <td className="mono">{r.event_time_text ?? "—"}</td>
-                        <td>{r.severity_text ?? "—"}</td>
-                        <td>{r.display_message}</td>
-                        <td className="mono dim">
-                          #{r.record_number?.toString() ?? "?"} L
-                          {r.line_start?.toString() ?? "?"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-          </section>
         </>
       )}
     </main>

@@ -475,6 +475,39 @@ impl MetaDb {
             .optional()?)
     }
 
+    pub fn get_scope_json(&self, scope_id: &str) -> Result<Option<String>, WorkspaceError> {
+        let conn = self.conn.lock();
+        Ok(conn
+            .query_row(
+                "SELECT canonical_json FROM scopes WHERE scope_id = ?1",
+                params![scope_id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn get_source_file(&self, file_id: &str) -> Result<Option<SourceFileRow>, WorkspaceError> {
+        let conn = self.conn.lock();
+        Ok(conn
+            .query_row(
+                "SELECT file_id, source_id, path, archive_entry, size_bytes, modified_at, content_hash
+                 FROM source_files WHERE file_id = ?1",
+                params![file_id],
+                |r| {
+                    Ok(SourceFileRow {
+                        file_id: r.get(0)?,
+                        source_id: r.get(1)?,
+                        path: r.get(2)?,
+                        archive_entry: r.get(3)?,
+                        size_bytes: r.get(4)?,
+                        modified_at: r.get(5)?,
+                        content_hash: r.get(6)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
     // ---- jobs ------------------------------------------------------------
 
     pub fn insert_job(

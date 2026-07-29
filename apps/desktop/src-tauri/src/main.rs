@@ -1,33 +1,41 @@
-//! LogScope desktop shell (v0.0 architecture proof).
+//! LogScope desktop shell.
 //!
 //! Thin typed command boundary over `logscope-app` services. React owns
-//! presentation only; every operation here delegates to shared services so
-//! the future CLI/Agent API keep identical semantics.
+//! presentation only; every operation delegates to shared services so any
+//! future caller keeps identical semantics. The workspace is shared as an
+//! `Arc` so queries, exports, and index jobs can run while the UI reads
+//! metadata; imports still take exclusive ownership (v0.0 model).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod explorer_cmds;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use logscope_app::dto::*;
 use logscope_app::{run_import, ImportRequest};
 use logscope_ingest::builtin;
 use logscope_jobs::{JobControl, JobEvent};
-use logscope_query::{query_log_page, EngineConnection, LogQueryRequest, QueryCancelHandle};
-use logscope_store::FtsIndex;
+use logscope_query::{EngineConnection, QueryCancelHandle};
 use logscope_workspace::Workspace;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-struct AppState {
-    workspace: Mutex<Option<Workspace>>,
-    engine: Mutex<EngineConnection>,
-    jobs: Mutex<HashMap<String, JobControl>>,
-    import_running: AtomicBool,
+/// Number of pooled query connections = maximum concurrent queries.
+const QUERY_POOL_SIZE: usize = 3;
+
+pub(crate) struct AppState {
+    pub(crate) workspace: Mutex<Option<Arc<Workspace>>>,
+    pub(crate) engines: Vec<Mutex<EngineConnection>>,
+    pub(crate) jobs: Mutex<HashMap<String, JobControl>>,
+    pub(crate) import_running: AtomicBool,
+    pub(crate) query_cancels: Mutex<HashMap<String, QueryCancelHandle>>,
 }
 
-type CmdResult<T> = Result<T, ErrorDto>;
+pub(crate) type CmdResult<T> = Result<T, ErrorDto>;
 
 fn ws_err(e: logscope_workspace::WorkspaceError) -> ErrorDto {
     ErrorDto::new(e.code(), e)
@@ -96,7 +104,7 @@ fn create_workspace(
         .map_err(ws_err)?;
     let info = workspace_info(&ws, false);
     remember_recent(&app, &info.root);
-    *slot = Some(ws);
+    *slot = Some(Arc::new(ws));
     Ok(info)
 }
 
@@ -117,7 +125,7 @@ fn open_workspace(
         Workspace::open(&PathBuf::from(&path), logscope_app::PRODUCT_VERSION).map_err(ws_err)?;
     let info = workspace_info(&ws, true);
     remember_recent(&app, &info.root);
-    *slot = Some(ws);
+    *slot = Some(Arc::new(ws));
     Ok(info)
 }
 
@@ -127,6 +135,12 @@ fn close_workspace(state: State<'_, AppState>) -> CmdResult<bool> {
         return Err(ErrorDto::new(
             "workspace/busy",
             "an import is running; cancel it before closing",
+        ));
+    }
+    if !state.jobs.lock().is_empty() {
+        return Err(ErrorDto::new(
+            "workspace/busy",
+            "background work is running; cancel it before closing",
         ));
     }
     Ok(state.workspace.lock().take().is_some())
@@ -196,6 +210,7 @@ fn start_import(
     let profile = match request.format.as_str() {
         "jsonl" => builtin::jsonl_generic(),
         "csv" => builtin::csv_basic(),
+        "elasticsearch" => builtin::elasticsearch_export(),
         other => {
             return Err(ErrorDto::new(
                 "import/unsupported-format",
@@ -207,9 +222,22 @@ fn start_import(
     if state.import_running.swap(true, Ordering::SeqCst) {
         return Err(ErrorDto::new("import/busy", "another import is running"));
     }
-    let Some(mut ws) = slot.take() else {
+    let Some(arc) = slot.take() else {
         state.import_running.store(false, Ordering::SeqCst);
         return Err(ErrorDto::new("workspace/none", "no workspace is open"));
+    };
+    // Imports need exclusive ownership; short-lived query handles may still
+    // hold clones for a moment.
+    let mut ws = match Arc::try_unwrap(arc) {
+        Ok(ws) => ws,
+        Err(arc) => {
+            *slot = Some(arc);
+            state.import_running.store(false, Ordering::SeqCst);
+            return Err(ErrorDto::new(
+                "workspace/busy",
+                "queries are still running; retry in a moment",
+            ));
+        }
     };
     drop(slot);
 
@@ -221,7 +249,6 @@ fn start_import(
     let job_id = format!("job-{}", uuid::Uuid::new_v4());
     let (tx, rx) = crossbeam_channel::unbounded::<JobEvent>();
 
-    // Forward job events onto the UI event bus.
     let event_app = app.clone();
     std::thread::spawn(move || {
         for event in rx.iter() {
@@ -242,7 +269,6 @@ fn start_import(
         .lock()
         .insert(job_id.clone(), handle.control.clone());
 
-    // Watcher restores the workspace when the job finishes.
     let watcher_app = app.clone();
     let watch_job_id = job_id.clone();
     std::thread::spawn(move || {
@@ -250,13 +276,9 @@ fn start_import(
         let state = watcher_app.state::<AppState>();
         match result {
             Ok((_outcome, ws)) => {
-                *state.workspace.lock() = Some(ws);
+                *state.workspace.lock() = Some(Arc::new(ws));
             }
             Err(e) => {
-                // The job thread itself failed (panic isolation already
-                // reported it); the workspace instance is lost with the
-                // thread, so the UI must reopen from disk. Recovery on the
-                // next open discards any staged leftovers.
                 tracing::error!(job = %watch_job_id, error = %e, "import job thread failed");
             }
         }
@@ -276,70 +298,6 @@ fn cancel_job(state: State<'_, AppState>, job_id: String) -> bool {
     } else {
         false
     }
-}
-
-#[tauri::command]
-fn query_logs(state: State<'_, AppState>, request: LogQueryDto) -> CmdResult<LogPageDto> {
-    let slot = state.workspace.lock();
-    let ws = slot
-        .as_ref()
-        .ok_or_else(|| ErrorDto::new("workspace/none", "no workspace is open"))?;
-
-    let dataset_ids = if request.dataset_ids.is_empty() {
-        ws.meta
-            .list_datasets()
-            .map_err(ws_err)?
-            .into_iter()
-            .filter(|d| d.status == "published")
-            .map(|d| d.dataset_id)
-            .collect()
-    } else {
-        request.dataset_ids.clone()
-    };
-    let mut files = Vec::new();
-    for id in &dataset_ids {
-        files.extend(ws.segment_paths(id).map_err(ws_err)?);
-    }
-    let fts = FtsIndex::open(&ws.layout.fts_logs_path()).map_err(|e| ErrorDto::new(e.code(), e))?;
-
-    let engine = state.engine.lock();
-    let cancel = QueryCancelHandle::new(engine.interrupt_handle());
-    let query = LogQueryRequest {
-        dataset_ids,
-        time_start: request.time_start,
-        time_end: request.time_end,
-        min_severity: request.min_severity,
-        contains_text: request.contains_text.clone(),
-        attr_equals: vec![],
-        resource_id: None,
-        trace_id: None,
-        limit: request.limit,
-        offset: request.offset,
-    };
-    let page = query_log_page(&engine, &files, &query, Some(&fts), &cancel, None)
-        .map_err(|e| ErrorDto::new(e.code(), e))?;
-    Ok(LogPageDto {
-        rows: page
-            .rows
-            .into_iter()
-            .map(|r| LogRowDto {
-                event_time_text: r
-                    .event_time
-                    .map(|t| logscope_model::UnixNanos(t).to_rfc3339()),
-                record_id: r.record_id,
-                event_time: r.event_time,
-                severity_text: r.severity_text,
-                severity_number: r.severity_number,
-                display_message: r.display_message,
-                dataset_id: r.dataset_id,
-                record_number: r.record_number,
-                line_start: r.line_start,
-                attributes_json: r.attributes_json,
-            })
-            .collect(),
-        has_more: page.has_more,
-        limit: page.limit,
-    })
 }
 
 /// Portable-mode fixed WebView2: when a `webview2/` folder ships next to the
@@ -367,14 +325,17 @@ fn main() {
         )
         .init();
 
-    let engine = EngineConnection::open_in_memory().expect("query engine init");
+    let engines: Vec<Mutex<EngineConnection>> = (0..QUERY_POOL_SIZE)
+        .map(|_| Mutex::new(EngineConnection::open_in_memory().expect("query engine init")))
+        .collect();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             workspace: Mutex::new(None),
-            engine: Mutex::new(engine),
+            engines,
             jobs: Mutex::new(HashMap::new()),
             import_running: AtomicBool::new(false),
+            query_cancels: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
             recent_workspaces,
@@ -384,7 +345,32 @@ fn main() {
             overview,
             start_import,
             cancel_job,
-            query_logs
+            explorer_cmds::validate_query,
+            explorer_cmds::field_catalog,
+            explorer_cmds::run_query,
+            explorer_cmds::run_histogram,
+            explorer_cmds::run_facets,
+            explorer_cmds::field_summary,
+            explorer_cmds::cancel_query,
+            explorer_cmds::get_record,
+            explorer_cmds::source_context,
+            explorer_cmds::build_predicate,
+            explorer_cmds::build_missing_predicate,
+            explorer_cmds::quote_value,
+            explorer_cmds::saved_searches,
+            explorer_cmds::save_search,
+            explorer_cmds::delete_saved_search,
+            explorer_cmds::column_sets,
+            explorer_cmds::save_column_set,
+            explorer_cmds::delete_column_set,
+            explorer_cmds::recent_searches,
+            explorer_cmds::delete_recent_search,
+            explorer_cmds::clear_recent_searches,
+            explorer_cmds::start_export,
+            explorer_cmds::export_status,
+            explorer_cmds::index_status,
+            explorer_cmds::rebuild_indexes,
+            explorer_cmds::list_import_profiles
         ])
         .run(tauri::generate_context!())
         .expect("error while running LogScope");

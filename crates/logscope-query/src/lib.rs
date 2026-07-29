@@ -27,11 +27,11 @@ pub use compile::{
 pub use engine::EngineConnection;
 pub use error::{ErrorEnvelope, QueryError};
 pub use explore::{
-    encode_cursor, fetch_record, query_counts, query_facets, query_field_summary, query_histogram,
-    query_page, query_source_context, resolve_window, FacetResult, FacetValue, FieldSummary,
-    FieldTarget, FilterCounts, Histogram, HistogramBin, PageRequest, QueryPage, ResolvedWindow,
-    SourceContext, TimeStrategy, MAX_CONTEXT_NEIGHBORS, MAX_FACET_FIELDS, MAX_FACET_TOP_K,
-    MAX_HISTOGRAM_BINS,
+    encode_cursor, fetch_record, fetch_record_detail, query_counts, query_facets,
+    query_field_summary, query_histogram, query_page, query_source_context, resolve_window,
+    FacetResult, FacetValue, FieldSummary, FieldTarget, FilterCounts, Histogram, HistogramBin,
+    PageRequest, QueryPage, RecordDetail, ResolvedWindow, SourceContext, TimeStrategy,
+    MAX_CONTEXT_NEIGHBORS, MAX_FACET_FIELDS, MAX_FACET_TOP_K, MAX_HISTOGRAM_BINS,
 };
 pub use fts_maintenance::index_segment_into_fts;
 pub use logs::{query_log_page, LogPage, LogQueryRequest, LogRow, MAX_PAGE_SIZE};

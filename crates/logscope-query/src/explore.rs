@@ -874,6 +874,58 @@ pub fn query_source_context(
     })
 }
 
+/// Full-detail record: the hot row plus the cold columns the detail panel
+/// distinguishes (typed body, scope, timestamp provenance).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordDetail {
+    pub row: LogRow,
+    pub scope_id: String,
+    pub body_json: Option<String>,
+    pub event_name: Option<String>,
+    pub original_timestamp_text: Option<String>,
+    pub timezone_assumption_json: Option<String>,
+    pub observed_time: i64,
+}
+
+/// Fetches one record with every detail column.
+pub fn fetch_record_detail(
+    engine: &EngineConnection,
+    files: &[PathBuf],
+    dataset_id: &str,
+    record_id: &str,
+    cancel: &QueryCancelHandle,
+    budget: Option<Duration>,
+) -> Result<Option<RecordDetail>, QueryError> {
+    if files.is_empty() {
+        return Ok(None);
+    }
+    let sql = format!(
+        "SELECT {LOG_COLUMNS}, scope_id, body_json, event_name, \
+                original_timestamp_text, timezone_assumption_json, observed_time \
+         FROM {files} WHERE dataset_id = ? AND record_id = ? LIMIT 1",
+        files = files_expr(files),
+    );
+    let budget = budget.unwrap_or(Duration::from_millis(DEFAULT_BUDGET_MS));
+    run_bounded(cancel, budget, || {
+        let conn = engine.raw();
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt
+            .query_map(duckdb::params![dataset_id, record_id], |r| {
+                Ok(RecordDetail {
+                    row: map_log_row(r)?,
+                    scope_id: r.get(14)?,
+                    body_json: r.get(15)?,
+                    event_name: r.get(16)?,
+                    original_timestamp_text: r.get(17)?,
+                    timezone_assumption_json: r.get(18)?,
+                    observed_time: r.get(19)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows.pop())
+    })
+}
+
 /// Fetches one complete record by identity.
 pub fn fetch_record(
     engine: &EngineConnection,

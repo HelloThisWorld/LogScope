@@ -2649,6 +2649,7 @@ dependencies = [
  "logscope-jobs",
  "logscope-model",
  "logscope-query",
+ "logscope-query-lang",
  "logscope-store",
  "logscope-workspace",
  "parking_lot",
