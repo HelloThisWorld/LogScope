@@ -1,0 +1,4 @@
+timestamp,level,message
+2024-06-01T10:00:00Z,INFO,fine
+2024-06-01T10:00:01Z,WARN,extra,columns,here
+2024-06-01T10:00:02Z,ERROR,"unbalanced quote never closes

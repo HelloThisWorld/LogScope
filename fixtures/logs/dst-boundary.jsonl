@@ -1,0 +1,3 @@
+{"local_time":"2024-10-27 02:30:00","note":"ambiguous in Europe/Berlin (DST fall-back overlap)","message":"ambiguous local time"}
+{"local_time":"2024-03-31 02:30:00","note":"nonexistent in Europe/Berlin (DST spring-forward gap)","message":"nonexistent local time"}
+{"local_time":"2024-06-15 12:00:00","note":"plain summer time","message":"regular local time"}

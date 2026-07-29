@@ -1,0 +1,24 @@
+# Rust
+/target/
+/target-fast/
+
+# Node
+node_modules/
+apps/desktop/dist/
+.vite/
+
+# Generated benchmark corpora and temporary workspaces (never commit)
+/bench-corpus/
+/tmp-workspaces/
+*.tmp-workspace/
+
+# Portable archives and packaging staging (build outputs, never commit)
+/dist-portable/
+
+# Local tool state
+*.local
+.DS_Store
+
+# Installers / bundles (build outputs)
+*.msi
+*.nsis.zip

@@ -1,0 +1,2 @@
+﻿{"@timestamp":"2024-06-01T10:00:00Z","level":"INFO","message":"bom line one"}
+{"@timestamp":"2024-06-01T10:00:01Z","level":"WARN","message":"bom line two"}

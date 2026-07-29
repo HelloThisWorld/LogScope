@@ -1,0 +1,4 @@
+2024-06-01T10:00:00.123456789Z stdout F {"level":"info","msg":"container ready"}
+2024-06-01T10:00:01.234567890Z stderr F worker exception: connection reset
+2024-06-01T10:00:02.345678901Z stdout P partial line that continu
+2024-06-01T10:00:02.345678902Z stdout F es across two CRI records

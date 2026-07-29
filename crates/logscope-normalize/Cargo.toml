@@ -1,0 +1,14 @@
+[package]
+name = "logscope-normalize"
+description = "Normalization and validation: timestamps, severities, attribute typing, derivations"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+logscope-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true

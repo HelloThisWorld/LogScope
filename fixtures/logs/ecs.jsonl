@@ -1,0 +1,3 @@
+{"@timestamp":"2024-06-01T10:00:00.123Z","log.level":"info","message":"request accepted","ecs":{"version":"8.11.0"},"service":{"name":"orders-svc","environment":"staging"},"http":{"request":{"method":"POST"},"response":{"status_code":201}},"url":{"path":"/api/orders"},"trace":{"id":"4bf92f3577b34da6a3ce929d0e0e4736"},"span":{"id":"00f067aa0ba902b7"}}
+{"@timestamp":"2024-06-01T10:00:01.456Z","log.level":"warn","message":"slow downstream call","service":{"name":"orders-svc"},"event":{"duration":2147000000},"labels":{"downstream":"inventory-svc"}}
+{"@timestamp":"2024-06-01T10:00:02.789Z","log.level":"error","message":"payment rejected","service":{"name":"payment-svc"},"error":{"type":"CardDeclined","message":"insufficient funds"},"transaction":{"id":"txn-000123"}}

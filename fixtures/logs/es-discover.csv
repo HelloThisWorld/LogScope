@@ -1,0 +1,4 @@
+"@timestamp","log.level","message","service.name","host.name","trace.id"
+"Jun 1, 2024 @ 10:00:00.123","info","request accepted","orders-svc","es-host-1","4bf92f3577b34da6a3ce929d0e0e4736"
+"Jun 1, 2024 @ 10:00:01.456","warn","slow downstream call","orders-svc","es-host-1",""
+"Jun 1, 2024 @ 10:00:02.789","error","payment rejected","payment-svc","es-host-2",""

@@ -1,0 +1,19 @@
+[package]
+name = "logscope-query-lang"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "LogScope query language v1: lexer, parser, typed AST, validation, fingerprints"
+
+[dependencies]
+logscope-model = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+# Linear-time regex engine; used to validate user regex/wildcard patterns
+# (size-limited) before they ever reach the execution engine.
+regex = "1"
+
+[dev-dependencies]
+proptest = "1"

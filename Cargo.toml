@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/logscope-model",
+    "crates/logscope-normalize",
+    "crates/logscope-workspace",
+    "crates/logscope-jobs",
+    "crates/logscope-ingest",
+    "crates/logscope-store",
+    "crates/logscope-query-lang",
+    "crates/logscope-query",
+    "crates/logscope-otlp",
+    "crates/logscope-app",
+    "crates/logscope-testsupport",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+repository = ""
+publish = false
+
+[workspace.dependencies]
+logscope-model = { path = "crates/logscope-model" }
+logscope-normalize = { path = "crates/logscope-normalize" }
+logscope-workspace = { path = "crates/logscope-workspace" }
+logscope-jobs = { path = "crates/logscope-jobs" }
+logscope-ingest = { path = "crates/logscope-ingest" }
+logscope-store = { path = "crates/logscope-store" }
+logscope-query-lang = { path = "crates/logscope-query-lang" }
+logscope-query = { path = "crates/logscope-query" }
+logscope-otlp = { path = "crates/logscope-otlp" }
+logscope-app = { path = "crates/logscope-app" }
+logscope-testsupport = { path = "crates/logscope-testsupport" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+blake3 = "1"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+csv = "1.3"
+flate2 = "1"
+encoding_rs = "0.8"
+tempfile = "3"
+
+# Uncertain-latest deps (rusqlite, duckdb, arrow/parquet, zip, rand, tokio stack,
+# otlp stack, ts-rs, tauri) are added per-crate via `cargo add` so the registry
+# picks current compatible versions; they are then pinned by Cargo.lock.
+
+[profile.dev.package.libduckdb-sys]
+opt-level = 2
+
+[profile.dev.package.libsqlite3-sys]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

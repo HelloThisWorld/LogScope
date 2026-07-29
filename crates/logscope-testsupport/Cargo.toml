@@ -1,0 +1,28 @@
+[package]
+name = "logscope-testsupport"
+description = "Test support: golden fixture access, deterministic corpus generators, benchmark helpers"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+logscope-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+rand = "0.9"
+rand_chacha = "0.9"
+logscope-app.workspace = true
+logscope-workspace.workspace = true
+logscope-ingest.workspace = true
+logscope-otlp.workspace = true
+logscope-store.workspace = true
+logscope-query.workspace = true
+logscope-query-lang.workspace = true
+logscope-jobs.workspace = true
+crossbeam-channel.workspace = true
+uuid.workspace = true
+tempfile.workspace = true
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_ProcessStatus", "Win32_Foundation", "Win32_System_Threading"] }

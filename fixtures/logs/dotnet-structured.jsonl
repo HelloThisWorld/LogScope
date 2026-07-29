@@ -1,0 +1,3 @@
+{"Timestamp":"2024-06-01T10:00:00.1234567Z","Level":"Information","MessageTemplate":"Handled {RequestPath}","Properties":{"RequestPath":"/weather","StatusCode":200,"Elapsed":12.34,"SourceContext":"Sample.Api.Handler"},"EventId":{"Id":1001,"Name":"RequestHandled"}}
+{"Timestamp":"2024-06-01T10:00:01.7654321Z","Level":"Warning","MessageTemplate":"Cache miss for {Key}","Properties":{"Key":"forecast:berlin","SourceContext":"Sample.Api.Cache"}}
+{"Timestamp":"2024-06-01T10:00:02.0000000Z","Level":"Error","MessageTemplate":"Unhandled exception","Exception":"System.InvalidOperationException: sequence contains no elements\n   at Sample.Api.Repo.First()","Properties":{"SourceContext":"Sample.Api"}}

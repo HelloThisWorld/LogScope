@@ -1,0 +1,11 @@
+2024-06-01 10:00:00.123 [http-nio-8080-exec-1] INFO  com.example.orders.OrderController - order accepted id=ord-1001
+2024-06-01 10:00:01.456 [http-nio-8080-exec-2] WARN  com.example.orders.InventoryClient - inventory lookup slow elapsedMs=2150
+2024-06-01 10:00:02.789 [http-nio-8080-exec-3] ERROR com.example.orders.PaymentService - payment processing failed
+java.lang.IllegalStateException: gateway unavailable
+	at com.example.orders.PaymentService.charge(PaymentService.java:87)
+	at com.example.orders.OrderController.submit(OrderController.java:41)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:614)
+Caused by: java.net.ConnectException: Connection refused
+	at java.base/sun.nio.ch.Net.pollConnect(Native Method)
+	... 12 common frames omitted
+2024-06-01 10:00:03.001 [http-nio-8080-exec-1] INFO  com.example.orders.OrderController - retry scheduled id=ord-1001

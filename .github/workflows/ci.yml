@@ -1,0 +1,117 @@
+name: CI
+
+# Feature branches get CI through their pull request only; direct pushes
+# trigger CI on the default branches. This avoids running every job twice
+# (push + pull_request) for the same commit.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# A newer push to the same branch/PR supersedes the previous run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  lint:
+    name: Format and lint (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
+
+  test-windows:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
+      - run: cargo test --workspace --exclude logscope-desktop
+
+  core-linux:
+    name: Shared-core tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
+      # Platform-neutral core: model, normalization, jobs, workspace,
+      # ingest, storage. (DuckDB-dependent query tests run on the desktop
+      # OS jobs to keep this job fast.)
+      - run: >
+          cargo test -p logscope-model -p logscope-normalize -p logscope-jobs
+          -p logscope-workspace -p logscope-ingest -p logscope-store
+
+  core-macos:
+    name: Shared-core tests + shell build smoke (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: >
+          cargo test -p logscope-model -p logscope-normalize -p logscope-jobs
+          -p logscope-workspace -p logscope-ingest -p logscope-store
+      - name: Frontend build
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build
+      - name: Tauri desktop shell build smoke
+        run: cargo build -p logscope-desktop
+
+  package-windows:
+    name: Portable ZIP (Windows, unsigned)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Seed the compilation cache even when a later step fails, so a
+          # red run still speeds up the next attempt.
+          cache-on-failure: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Frontend install
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Assemble portable archive (no signing identity)
+        run: pwsh scripts/package-portable.ps1 -Version 0.0.0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LogScope-windows-x64-portable
+          path: |
+            dist-portable/*.zip
+            dist-portable/*.sha256

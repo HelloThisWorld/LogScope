@@ -1,0 +1,32 @@
+[package]
+name = "logscope-desktop"
+description = "LogScope desktop shell (Tauri)"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "logscope"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+logscope-app.workspace = true
+logscope-workspace.workspace = true
+logscope-query.workspace = true
+logscope-query-lang.workspace = true
+logscope-store.workspace = true
+logscope-jobs.workspace = true
+logscope-ingest.workspace = true
+logscope-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
