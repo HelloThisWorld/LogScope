@@ -6,12 +6,17 @@
 
 pub mod db;
 pub mod error;
+pub mod explorer_meta;
 pub mod layout;
 pub mod manifest;
 pub mod meta;
 pub mod workspace;
 
 pub use error::WorkspaceError;
+pub use explorer_meta::{
+    ColumnSetRow, ExportJobRow, FieldStatRow, IndexStateRow, RecentSearchRow, SavedSearchRow,
+    MAX_RECENT_SEARCHES,
+};
 pub use layout::WorkspaceLayout;
 pub use manifest::Manifest;
 pub use meta::{

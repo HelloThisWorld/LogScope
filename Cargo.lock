@@ -2747,8 +2747,12 @@ dependencies = [
 name = "logscope-query"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
+ "blake3",
+ "chrono",
  "duckdb",
  "logscope-model",
+ "logscope-query-lang",
  "logscope-store",
  "rusqlite",
  "serde",

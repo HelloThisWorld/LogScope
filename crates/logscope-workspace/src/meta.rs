@@ -151,6 +151,12 @@ pub struct MetaDb {
 }
 
 impl MetaDb {
+    /// Crate-internal access to the underlying connection (repositories in
+    /// sibling modules).
+    pub(crate) fn raw(&self) -> parking_lot::MutexGuard<'_, Connection> {
+        self.conn.lock()
+    }
+
     pub fn open(path: &Path) -> Result<Self, WorkspaceError> {
         let mut conn = db::open_connection(path)?;
         db::migrate(&mut conn)?;

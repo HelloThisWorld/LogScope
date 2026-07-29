@@ -14,8 +14,15 @@ use duckdb::{Config, Connection, InterruptHandle};
 use crate::error::QueryError;
 
 /// SQL applied to every new connection before any user query runs.
+///
+/// `compressed_materialization` is disabled because the bundled DuckDB
+/// 1.10505.0 debug build hits an internal assertion
+/// (`compress_integral.cpp: min_val <= input`) when sorting/grouping
+/// integer keys that contain NULLs (our `event_time DESC NULLS LAST`
+/// keyset order). Re-evaluate on the next DuckDB upgrade.
 const HARDEN_SQL: &str = "SET autoinstall_known_extensions = false;\
-     SET autoload_known_extensions = false;";
+     SET autoload_known_extensions = false;\
+     SET disabled_optimizers = 'compressed_materialization';";
 
 /// A DuckDB connection with offline hardening applied.
 pub struct EngineConnection {

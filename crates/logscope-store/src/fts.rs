@@ -19,24 +19,67 @@ pub struct FtsHit {
     pub segment_id: String,
 }
 
+/// Tokenizer/semantics version of the FTS index. v2 (LogScope 0.2) uses
+/// `unicode61 remove_diacritics 0` so that indexed text search and the
+/// bounded regex fallback scan share one documented token definition
+/// (case-insensitive, diacritics NOT folded). v1 databases (0.0, diacritic
+/// folding on) are detected via `PRAGMA user_version` and rebuilt.
+pub const FTS_INDEX_VERSION: i64 = 2;
+
+const FTS_V2_SCHEMA: &str = "CREATE VIRTUAL TABLE IF NOT EXISTS fts_logs USING fts5(
+        message,
+        record_id UNINDEXED,
+        dataset_id UNINDEXED,
+        segment_id UNINDEXED,
+        tokenize = 'unicode61 remove_diacritics 0'
+     );";
+
 pub struct FtsIndex {
     conn: Connection,
 }
 
 impl FtsIndex {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
+        let existed = path.exists();
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.execute_batch(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS fts_logs USING fts5(
-                message,
-                record_id UNINDEXED,
-                dataset_id UNINDEXED,
-                segment_id UNINDEXED,
-                tokenize = 'unicode61'
-             );",
+        let table_exists: i64 = conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'fts_logs'",
+            [],
+            |r| r.get(0),
         )?;
+        if table_exists == 0 {
+            conn.execute_batch(FTS_V2_SCHEMA)?;
+            conn.pragma_update(None, "user_version", FTS_INDEX_VERSION)?;
+        } else if !existed {
+            // Cannot happen (fresh file has no table), but keep the invariant.
+            conn.pragma_update(None, "user_version", FTS_INDEX_VERSION)?;
+        }
         Ok(FtsIndex { conn })
+    }
+
+    /// Tokenizer version of this database (0 = pre-versioned v0.0 index).
+    pub fn version(&self) -> Result<i64, StoreError> {
+        Ok(self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))?)
+    }
+
+    /// True when this database predates [`FTS_INDEX_VERSION`] and must be
+    /// rebuilt before indexed text search may be used.
+    pub fn needs_rebuild(&self) -> Result<bool, StoreError> {
+        Ok(self.version()? < FTS_INDEX_VERSION)
+    }
+
+    /// Drops all indexed data and re-creates the table with the current
+    /// tokenizer. Used by the rebuild job; the index is derived state, so
+    /// losing it is always recoverable.
+    pub fn reset_to_current_version(&mut self) -> Result<(), StoreError> {
+        self.conn.execute_batch("DROP TABLE IF EXISTS fts_logs;")?;
+        self.conn.execute_batch(FTS_V2_SCHEMA)?;
+        self.conn
+            .pragma_update(None, "user_version", FTS_INDEX_VERSION)?;
+        Ok(())
     }
 
     /// Indexes one immutable segment's display messages in a single
@@ -83,11 +126,18 @@ impl FtsIndex {
         user_query: &str,
         limit: usize,
     ) -> Result<Vec<FtsHit>, StoreError> {
-        if dataset_ids.is_empty() {
-            return Ok(vec![]);
-        }
-        let match_expr = escape_match_query(user_query);
-        if match_expr.is_empty() {
+        self.search_logs_expr(dataset_ids, &escape_match_query(user_query), limit)
+    }
+
+    /// Bounded search with a pre-built MATCH expression. The expression must
+    /// come from trusted code (the query compiler), never raw user text.
+    pub fn search_logs_expr(
+        &self,
+        dataset_ids: &[String],
+        match_expr: &str,
+        limit: usize,
+    ) -> Result<Vec<FtsHit>, StoreError> {
+        if dataset_ids.is_empty() || match_expr.is_empty() {
             return Ok(vec![]);
         }
         let placeholders = (0..dataset_ids.len())
@@ -115,6 +165,37 @@ impl FtsIndex {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// Number of hits for a trusted MATCH expression across datasets,
+    /// counted up to `cap` (the caller only needs "fits / does not fit").
+    pub fn count_logs_expr(
+        &self,
+        dataset_ids: &[String],
+        match_expr: &str,
+        cap: usize,
+    ) -> Result<usize, StoreError> {
+        if dataset_ids.is_empty() || match_expr.is_empty() {
+            return Ok(0);
+        }
+        let placeholders = (0..dataset_ids.len())
+            .map(|i| format!("?{}", i + 3))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT count(*) FROM (
+                SELECT 1 FROM fts_logs
+                WHERE fts_logs MATCH ?1 AND dataset_id IN ({placeholders})
+                LIMIT ?2)"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let cap_param = cap as i64 + 1;
+        let mut params_vec: Vec<&dyn rusqlite::ToSql> = vec![&match_expr, &cap_param];
+        for d in dataset_ids {
+            params_vec.push(d);
+        }
+        let n: i64 = stmt.query_row(params_vec.as_slice(), |r| r.get(0))?;
+        Ok(n as usize)
     }
 }
 

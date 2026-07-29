@@ -76,7 +76,7 @@ fn sql_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-fn files_expr(files: &[PathBuf]) -> String {
+pub(crate) fn files_expr(files: &[PathBuf]) -> String {
     let list = files
         .iter()
         .map(|p| sql_quote(&p.to_string_lossy()))

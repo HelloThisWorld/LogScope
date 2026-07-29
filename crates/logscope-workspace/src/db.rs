@@ -9,8 +9,14 @@ use crate::error::WorkspaceError;
 /// Embedded, ordered, forward-only migrations. Each runs in one transaction
 /// and is recorded in `schema_migrations`. Never edit a shipped migration;
 /// add a new one.
-const MIGRATIONS: &[(i64, &str, &str)] =
-    &[(1, "0001_init", include_str!("migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i64, &str, &str)] = &[
+    (1, "0001_init", include_str!("migrations/0001_init.sql")),
+    (
+        2,
+        "0002_explorer",
+        include_str!("migrations/0002_explorer.sql"),
+    ),
+];
 
 /// Highest schema version this build can open.
 pub fn supported_schema_version() -> i64 {

@@ -13,7 +13,7 @@ pub mod segment;
 pub mod span_writer;
 
 pub use error::StoreError;
-pub use fts::{escape_match_query, FtsHit, FtsIndex};
+pub use fts::{escape_match_query, FtsHit, FtsIndex, FTS_INDEX_VERSION};
 pub use log_writer::LogSegmentWriter;
 pub use metric_writer::MetricSegmentWriter;
 pub use schema::{logs_schema, metrics_schema, spans_schema, STORAGE_SCHEMA_VERSION};
