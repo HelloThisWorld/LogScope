@@ -1,12 +1,12 @@
 name: CI
 
-# Feature branches get CI through their pull request only; direct pushes
-# trigger CI on the default branches. This avoids running every job twice
-# (push + pull_request) for the same commit.
+# CI runs on pull requests only: the PR run validates the exact tree
+# being merged, so the merge push to main does not build again. Use
+# workflow_dispatch to run CI on demand (e.g. after a direct push to
+# main, which otherwise gets no automatic build).
 on:
-  push:
-    branches: [main, master]
   pull_request:
+  workflow_dispatch:
 
 # A newer push to the same branch/PR supersedes the previous run.
 concurrency:
@@ -17,34 +17,37 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+# Windows jobs run on the repository's self-hosted runner (private repo,
+# maintainer-owned machine): compilation is minutes instead of tens of
+# minutes and consumes no billed minutes. The runner's persistent target
+# directory replaces rust-cache for these jobs.
+#
+# SECURITY: if this repository ever becomes public, move these jobs back
+# to hosted runners (or gate fork PRs away from self-hosted) BEFORE the
+# visibility change — public fork PRs must never execute on a private
+# machine.
+#
+# Self-hosted machine prerequisites (not installed by the workflow):
+# rustup stable toolchain with rustfmt + clippy, Git, PowerShell 7.
+# dtolnay/rust-toolchain is intentionally NOT used on these jobs: it is
+# a composite action whose steps run under `shell: bash`, and a machine
+# where WSL's bash.exe shadows Git Bash mangles the script paths. The
+# toolchain is preinstalled, so the action is unnecessary here.
+
 jobs:
   lint:
     name: Format and lint (Windows)
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Seed the compilation cache even when a later step fails, so a
-          # red run still speeds up the next attempt.
-          cache-on-failure: true
       - run: cargo fmt --check
       - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
 
   test-windows:
     name: Tests (Windows)
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Seed the compilation cache even when a later step fails, so a
-          # red run still speeds up the next attempt.
-          cache-on-failure: true
       - run: cargo test --workspace --exclude logscope-desktop
 
   core-linux:
@@ -92,15 +95,9 @@ jobs:
 
   package-windows:
     name: Portable ZIP (Windows, unsigned)
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Seed the compilation cache even when a later step fails, so a
-          # red run still speeds up the next attempt.
-          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
