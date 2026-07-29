@@ -17,34 +17,34 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+# Windows jobs run on the repository's self-hosted runner (private repo,
+# maintainer-owned machine): compilation is minutes instead of tens of
+# minutes and consumes no billed minutes. The runner's persistent target
+# directory replaces rust-cache for these jobs.
+#
+# SECURITY: if this repository ever becomes public, move these jobs back
+# to hosted runners (or gate fork PRs away from self-hosted) BEFORE the
+# visibility change — public fork PRs must never execute on a private
+# machine.
+
 jobs:
   lint:
     name: Format and lint (Windows)
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Seed the compilation cache even when a later step fails, so a
-          # red run still speeds up the next attempt.
-          cache-on-failure: true
       - run: cargo fmt --check
       - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
 
   test-windows:
     name: Tests (Windows)
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Seed the compilation cache even when a later step fails, so a
-          # red run still speeds up the next attempt.
-          cache-on-failure: true
       - run: cargo test --workspace --exclude logscope-desktop
 
   core-linux:
@@ -92,15 +92,10 @@ jobs:
 
   package-windows:
     name: Portable ZIP (Windows, unsigned)
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Seed the compilation cache even when a later step fails, so a
-          # red run still speeds up the next attempt.
-          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
