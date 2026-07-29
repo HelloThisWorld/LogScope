@@ -9,6 +9,8 @@ pub enum QueryError {
     Engine(#[from] duckdb::Error),
     #[error("full-text index error: {0}")]
     Fts(#[from] rusqlite::Error),
+    #[error("storage error: {0}")]
+    Store(#[from] logscope_store::StoreError),
     #[error("query was cancelled")]
     Cancelled,
     #[error("query exceeded the configured execution budget")]
@@ -25,6 +27,7 @@ impl QueryError {
         match self {
             QueryError::Engine(_) => "query/engine",
             QueryError::Fts(_) => "query/fts",
+            QueryError::Store(_) => "query/store",
             QueryError::Cancelled => "query/cancelled",
             QueryError::Timeout => "query/timeout",
             QueryError::InvalidParameter(_) => "query/invalid-parameter",

@@ -103,6 +103,11 @@ pub enum QualityFlag {
     TimezoneAssumed,
     /// Severity text had no known mapping to an OTLP severity number.
     SeverityUnmapped,
+    /// Trace ID field was present but not a valid 32-hex-char ID; the raw
+    /// value stays in attributes.
+    TraceIdInvalid,
+    /// Span ID field was present but not a valid 16-hex-char ID.
+    SpanIdInvalid,
     /// Attribute key appeared more than once; the last value won.
     DuplicateAttributeKey { key: String },
     /// OTLP JSON envelope carried fields unknown to this version; the raw

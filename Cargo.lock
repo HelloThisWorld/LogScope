@@ -1564,6 +1564,8 @@ name = "logscope-app"
 version = "0.0.0"
 dependencies = [
  "chrono",
+ "crossbeam-channel",
+ "flate2",
  "logscope-ingest",
  "logscope-jobs",
  "logscope-model",
@@ -1647,6 +1649,7 @@ dependencies = [
  "bytes",
  "chrono",
  "http",
+ "logscope-ingest",
  "logscope-model",
  "logscope-normalize",
  "opentelemetry-proto",
@@ -1657,6 +1660,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-prost",
  "tracing",
