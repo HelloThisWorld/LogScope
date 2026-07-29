@@ -26,6 +26,13 @@ env:
 # to hosted runners (or gate fork PRs away from self-hosted) BEFORE the
 # visibility change — public fork PRs must never execute on a private
 # machine.
+#
+# Self-hosted machine prerequisites (not installed by the workflow):
+# rustup stable toolchain with rustfmt + clippy, Git, PowerShell 7.
+# dtolnay/rust-toolchain is intentionally NOT used on these jobs: it is
+# a composite action whose steps run under `shell: bash`, and a machine
+# where WSL's bash.exe shadows Git Bash mangles the script paths. The
+# toolchain is preinstalled, so the action is unnecessary here.
 
 jobs:
   lint:
@@ -33,9 +40,6 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
       - run: cargo fmt --check
       - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
 
@@ -44,7 +48,6 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace --exclude logscope-desktop
 
   core-linux:
@@ -95,7 +98,6 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
           node-version: 22
