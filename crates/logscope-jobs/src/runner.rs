@@ -68,6 +68,29 @@ pub struct JobContext {
 }
 
 impl JobContext {
+    /// Foreground context for running a job body inline (synchronous
+    /// maintenance work, tests). Progress events go to the returned
+    /// receiver; cancellation goes through the returned control.
+    pub fn detached(
+        job_id: impl Into<String>,
+    ) -> (
+        JobContext,
+        JobControl,
+        crossbeam_channel::Receiver<JobEvent>,
+    ) {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let control = JobControl::new();
+        (
+            JobContext {
+                job_id: job_id.into(),
+                control: control.clone(),
+                events: tx,
+            },
+            control,
+            rx,
+        )
+    }
+
     pub fn report(&self, progress: JobProgress) {
         // Progress delivery is best effort: a full/disconnected listener
         // must never stall or fail the job itself.

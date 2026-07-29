@@ -140,6 +140,55 @@ pub mod builtin {
         }
     }
 
+    /// Elasticsearch export (JSONL of `_source` documents or plain hit
+    /// objects; ECS-style field names). Generic and organization-agnostic:
+    /// this maps only public Elasticsearch/ECS conventions.
+    pub fn elasticsearch_export() -> ImportProfile {
+        ImportProfile {
+            profile_id: "builtin.elasticsearch.export".into(),
+            version: "1".into(),
+            contract_version: PROFILE_CONTRACT_VERSION,
+            display_name: "Elasticsearch export (JSONL, ECS field names)".into(),
+            format: FormatSpec::Jsonl,
+            timestamp: Some(TimestampRule {
+                candidates: vec![
+                    FieldRef::name("@timestamp"),
+                    FieldRef::name("timestamp"),
+                    FieldRef::name("event.created"),
+                ],
+                format: TimestampFormat::Rfc3339,
+                timezone: TimezonePolicy::AssumeUtc,
+            }),
+            severity: vec![
+                FieldRef::name("log.level"),
+                FieldRef::name("level"),
+                FieldRef::name("severity"),
+            ],
+            message: vec![
+                FieldRef::name("message"),
+                FieldRef::name("event.original"),
+                FieldRef::name("msg"),
+            ],
+            trace_id: vec![FieldRef::name("trace.id"), FieldRef::name("trace_id")],
+            span_id: vec![FieldRef::name("span.id"), FieldRef::name("span_id")],
+            generic_fields: BTreeMap::from([
+                (
+                    "event_type".to_string(),
+                    vec![FieldRef::name("event.type"), FieldRef::name("event.action")],
+                ),
+                ("outcome".to_string(), vec![FieldRef::name("event.outcome")]),
+                (
+                    "request_id".to_string(),
+                    vec![FieldRef::name("http.request.id")],
+                ),
+                (
+                    "transaction_id".to_string(),
+                    vec![FieldRef::name("transaction.id")],
+                ),
+            ]),
+        }
+    }
+
     /// Generic CSV with `timestamp,level,message` style headers.
     pub fn csv_basic() -> ImportProfile {
         ImportProfile {
@@ -185,7 +234,11 @@ mod tests {
 
     #[test]
     fn profiles_serialize_round_trip() {
-        for p in [builtin::jsonl_generic(), builtin::csv_basic()] {
+        for p in [
+            builtin::jsonl_generic(),
+            builtin::csv_basic(),
+            builtin::elasticsearch_export(),
+        ] {
             p.validate().unwrap();
             let json = serde_json::to_string_pretty(&p).unwrap();
             let back: ImportProfile = serde_json::from_str(&json).unwrap();

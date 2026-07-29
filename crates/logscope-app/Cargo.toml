@@ -13,6 +13,7 @@ logscope-jobs.workspace = true
 logscope-ingest.workspace = true
 logscope-store.workspace = true
 logscope-query.workspace = true
+logscope-query-lang.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -27,3 +28,4 @@ blake3.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+rusqlite = { version = "0.40.1", features = ["bundled"] }

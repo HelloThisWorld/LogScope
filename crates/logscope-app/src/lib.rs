@@ -5,8 +5,14 @@
 //! automation share exactly the same semantics.
 
 pub mod dto;
+pub mod explorer;
+pub mod export;
 pub mod import;
 
+pub use export::{
+    run_export, ExportFormat, ExportOutcome, ExportSpec, DEFAULT_CSV_COLUMNS, DEFAULT_EXPORT_BYTES,
+    DEFAULT_EXPORT_ROWS, MAX_EXPORT_BYTES, MAX_EXPORT_ROWS,
+};
 pub use import::{run_import, ImportOutcome, ImportRequest};
 
 /// Product version stamped into workspaces and manifests.

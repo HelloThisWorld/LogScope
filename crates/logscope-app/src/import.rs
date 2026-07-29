@@ -480,6 +480,45 @@ fn run_import_inner(
             .map_err(meta_fail)?;
         segment_ids.push(seg.segment_id.clone());
     }
+    // Derived-index lifecycle: FTS rows just landed (current tokenizer if
+    // the index file is current); the field catalog is built next.
+    let fts_current = !fts.needs_rebuild().unwrap_or(true);
+    drop(fts);
+    if fts_current {
+        crate::explorer::note_new_dataset_indexes(ws, dataset_id).map_err(meta_fail)?;
+    } else {
+        // Rows went into an outdated index file: text search for this
+        // dataset stays on the exact fallback until the rebuild job runs.
+        ws.meta
+            .set_index_state("fts", dataset_id, 1, "pending", "{}")
+            .map_err(meta_fail)?;
+        ws.meta
+            .set_index_state(
+                "field_catalog",
+                dataset_id,
+                logscope_query::CATALOG_VERSION,
+                "pending",
+                "{}",
+            )
+            .map_err(meta_fail)?;
+    }
+
+    // Field catalog build. The dataset is already published and the
+    // catalog is optional for integrity, so cancellation or failure here
+    // never un-completes the import — the state stays pending/failed and a
+    // later rebuild job picks it up.
+    ctx.report(JobProgress {
+        stage: "cataloguing".into(),
+        records_accepted: accepted,
+        records_rejected: rejected,
+        records_unparsed: unparsed,
+        records_duplicate: duplicates,
+        bytes_processed: bytes_before_current,
+        ..Default::default()
+    });
+    if let Err(e) = crate::explorer::build_field_catalog(ws, engine, dataset_id, ctx) {
+        tracing::warn!(dataset = %dataset_id, error = %e, "field catalog build deferred");
+    }
 
     Ok(ImportOutcome {
         job_id: job_id.to_string(),
