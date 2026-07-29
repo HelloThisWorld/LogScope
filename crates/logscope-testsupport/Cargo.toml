@@ -10,5 +10,18 @@ logscope-model.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
-rand = "0.10.2"
-rand_chacha = "0.10.0"
+rand = "0.9"
+rand_chacha = "0.9"
+logscope-app = { version = "0.0.0", path = "../logscope-app" }
+logscope-workspace = { version = "0.0.0", path = "../logscope-workspace" }
+logscope-ingest = { version = "0.0.0", path = "../logscope-ingest" }
+logscope-otlp = { version = "0.0.0", path = "../logscope-otlp" }
+logscope-store = { version = "0.0.0", path = "../logscope-store" }
+logscope-query = { version = "0.0.0", path = "../logscope-query" }
+logscope-jobs = { version = "0.0.0", path = "../logscope-jobs" }
+crossbeam-channel.workspace = true
+uuid.workspace = true
+tempfile.workspace = true
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_ProcessStatus", "Win32_Foundation", "Win32_System_Threading"] }

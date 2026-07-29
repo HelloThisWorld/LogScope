@@ -1,0 +1,81 @@
+:root {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color-scheme: light dark;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem 3rem;
+}
+h1 {
+  margin-bottom: 0;
+}
+.subtitle {
+  margin-top: 0.2rem;
+  opacity: 0.7;
+}
+section {
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+input,
+select,
+button {
+  font: inherit;
+  padding: 0.3rem 0.55rem;
+}
+button.link {
+  background: none;
+  border: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+th,
+td {
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+  text-align: left;
+  padding: 0.25rem 0.5rem;
+  vertical-align: top;
+}
+td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mono {
+  font-family: Consolas, monospace;
+  font-size: 0.85rem;
+}
+.dim {
+  opacity: 0.65;
+}
+.error {
+  background: rgba(200, 40, 40, 0.15);
+  border: 1px solid rgba(200, 40, 40, 0.5);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin: 0.5rem 0;
+}
+.status,
+.jobline {
+  opacity: 0.85;
+  margin: 0.5rem 0;
+}

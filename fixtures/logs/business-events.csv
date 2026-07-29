@@ -1,0 +1,5 @@
+event_time,event_type,entity_id,operation,outcome,amount,currency
+2024-06-01T10:00:00Z,order.created,ord-1001,create,success,49.90,EUR
+2024-06-01T10:00:05Z,order.paid,ord-1001,pay,success,49.90,EUR
+2024-06-01T10:00:09Z,order.shipped,ord-1001,ship,success,,
+2024-06-01T10:01:00Z,order.created,ord-1002,create,failure,120.00,EUR

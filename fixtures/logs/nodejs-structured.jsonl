@@ -1,0 +1,3 @@
+{"level":30,"time":1717236000123,"pid":4321,"hostname":"node-host-1","msg":"server listening","port":8080}
+{"level":40,"time":1717236001456,"pid":4321,"hostname":"node-host-1","msg":"retrying fetch","attempt":2,"target":"catalog"}
+{"level":50,"time":1717236002789,"pid":4321,"hostname":"node-host-1","msg":"unhandled rejection","err":{"type":"TypeError","message":"x is not a function","stack":"TypeError: x is not a function\n    at run (/srv/app/index.js:10:3)"}}

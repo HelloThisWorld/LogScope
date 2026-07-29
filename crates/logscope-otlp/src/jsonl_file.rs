@@ -59,6 +59,65 @@ fn detect_and_parse(value: serde_json::Value) -> Result<EnvelopePayload, String>
     }
 }
 
+/// Streams an OTLP JSONL input envelope by envelope: memory stays bounded
+/// by the largest single envelope, never the file. The sink returns `false`
+/// to stop early.
+pub fn stream_otlp_jsonl(
+    input: impl Read,
+    mut sink: impl FnMut(JsonlEnvelope) -> bool,
+    mut on_reject: impl FnMut(JsonlReject),
+) -> Result<u64, OtlpError> {
+    let mut reader = JsonlReader::new(input);
+    let mut delivered = 0u64;
+    'outer: loop {
+        let items = reader
+            .next_batch(64)
+            .map_err(|e| OtlpError::Envelope(e.to_string()))?;
+        if items.is_empty() {
+            break;
+        }
+        for item in items {
+            match item {
+                ReadItem::Parsed(parsed) => {
+                    let value = match parsed.fields {
+                        logscope_ingest::ParsedFields::Json(v) => v,
+                        other => unreachable!("jsonl reader yields json fields, got {other:?}"),
+                    };
+                    match detect_and_parse(value) {
+                        Ok(payload) => {
+                            delivered += 1;
+                            let envelope = JsonlEnvelope {
+                                payload,
+                                meta: EnvelopeMeta {
+                                    protocol: SourceProtocol::OtlpJsonlFile,
+                                    content_type: "application/x-ndjson".to_string(),
+                                    raw_hash: parsed.raw_hash,
+                                    received_at: UnixNanos::now(),
+                                },
+                                locator: parsed.locator,
+                            };
+                            if !sink(envelope) {
+                                break 'outer;
+                            }
+                        }
+                        Err(message) => on_reject(JsonlReject {
+                            locator: parsed.locator,
+                            reason_code: "otlp/invalid-envelope".to_string(),
+                            message,
+                        }),
+                    }
+                }
+                ReadItem::Malformed(m) => on_reject(JsonlReject {
+                    locator: m.locator,
+                    reason_code: m.reason_code.to_string(),
+                    message: m.message,
+                }),
+            }
+        }
+    }
+    Ok(delivered)
+}
+
 /// Reads a complete OTLP JSONL stream (bounded per-batch internally).
 pub fn read_otlp_jsonl(input: impl Read) -> Result<JsonlImportResult, OtlpError> {
     let mut reader = JsonlReader::new(input);

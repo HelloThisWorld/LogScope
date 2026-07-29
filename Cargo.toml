@@ -11,6 +11,7 @@ members = [
     "crates/logscope-otlp",
     "crates/logscope-app",
     "crates/logscope-testsupport",
+    "apps/desktop/src-tauri",
 ]
 
 [workspace.package]

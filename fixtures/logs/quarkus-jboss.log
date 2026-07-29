@@ -1,0 +1,5 @@
+2024-06-01 10:00:00,123 INFO  [io.quarkus] (main) sample-app 1.0.0 on JVM started in 1.284s. Listening on: http://0.0.0.0:8080
+2024-06-01 10:00:01,456 INFO  [org.acme.GreetingResource] (executor-thread-1) greeting requested name=world
+2024-06-01 10:00:02,789 WARN  [org.acme.RateLimiter] (executor-thread-2) rate limit approaching bucket=default remaining=3
+2024-06-01 10:00:03,012 ERROR [org.acme.GreetingResource] (executor-thread-1) request failed: jakarta.ws.rs.NotFoundException: HTTP 404 Not Found
+	at org.jboss.resteasy.reactive.server.handlers.ClassRoutingHandler.throwNotFound(ClassRoutingHandler.java:76)

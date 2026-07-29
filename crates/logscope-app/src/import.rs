@@ -60,6 +60,34 @@ fn job_err(code: &str, e: impl std::fmt::Display) -> JobError {
     JobError::new(code, e.to_string())
 }
 
+/// Compact 16-byte dedup key from a `xxx-<32 hex>` record ID, keeping the
+/// in-job duplicate set bounded (~48 bytes/record instead of ~100).
+fn record_id_key(record_id: &str) -> [u8; 16] {
+    let hex = record_id.split_once('-').map(|(_, h)| h).unwrap_or(record_id);
+    let mut key = [0u8; 16];
+    if hex.len() == 32 {
+        let bytes = hex.as_bytes();
+        let mut ok = true;
+        for (i, chunk) in bytes.chunks_exact(2).enumerate() {
+            let hi = (chunk[0] as char).to_digit(16);
+            let lo = (chunk[1] as char).to_digit(16);
+            match (hi, lo) {
+                (Some(h), Some(l)) => key[i] = ((h << 4) | l) as u8,
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            return key;
+        }
+    }
+    let digest = blake3::hash(record_id.as_bytes());
+    key.copy_from_slice(&digest.as_bytes()[..16]);
+    key
+}
+
 fn open_reader(
     path: &Path,
     profile: &ImportProfile,
@@ -199,7 +227,7 @@ fn run_import_inner(
     let mut rejected = 0u64;
     let mut duplicates = 0u64;
     let mut bytes_before_current = 0u64;
-    let mut seen_record_ids: HashSet<String> = HashSet::new();
+    let mut seen_record_ids: HashSet<[u8; 16]> = HashSet::new();
     let mut staged: Vec<(PathBuf, SegmentToPublish)> = Vec::new();
     let mut ledger: Vec<LedgerEntry> = Vec::new();
 
@@ -265,7 +293,7 @@ fn run_import_inner(
                         }
                         match normalize_log(parsed, &request.profile, &norm_ctx) {
                             Ok(record) => {
-                                if seen_record_ids.insert(record.record_id.clone()) {
+                                if seen_record_ids.insert(record_id_key(&record.record_id)) {
                                     batch_records.push(record);
                                 } else {
                                     duplicates += 1;

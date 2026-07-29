@@ -103,7 +103,7 @@ impl<R: Read> RecordReader for JsonlReader<R> {
                 self.done = true;
                 break;
             }
-            let start = self.byte_pos;
+            let mut start = self.byte_pos;
             self.byte_pos += n as u64;
             self.line_no += 1;
 
@@ -114,6 +114,12 @@ impl<R: Read> RecordReader for JsonlReader<R> {
             }
             if content.last() == Some(&b'\r') {
                 content = &content[..content.len() - 1];
+            }
+            // Strip a UTF-8 BOM on the very first line; byte locators keep
+            // pointing at the record text inside the physical file.
+            if self.line_no == 1 && content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                content = &content[3..];
+                start += 3;
             }
             // Blank lines are skipped silently (not records, not errors).
             if content.iter().all(|b| b.is_ascii_whitespace()) {
@@ -206,8 +212,37 @@ pub struct CsvReader<R: Read> {
     prev_line: u64,
 }
 
+/// Consumes a leading UTF-8 BOM if present, returning a reader positioned
+/// after it plus any non-BOM bytes already read.
+fn skip_utf8_bom<R: Read>(
+    mut inner: R,
+) -> Result<std::io::Chain<std::io::Cursor<Vec<u8>>, R>, std::io::Error> {
+    let mut head = [0u8; 3];
+    let mut filled = 0;
+    while filled < 3 {
+        let n = inner.read(&mut head[filled..])?;
+        if n == 0 {
+            break;
+        }
+        filled += n;
+    }
+    let prefix = if filled == 3 && head == [0xEF, 0xBB, 0xBF] {
+        Vec::new()
+    } else {
+        head[..filled].to_vec()
+    };
+    Ok(std::io::Cursor::new(prefix).chain(inner))
+}
+
 impl<R: Read> CsvReader<R> {
-    pub fn new(inner: R, delimiter: u8, has_headers: bool) -> Result<Self, IngestError> {
+    pub fn new(
+        inner: R,
+        delimiter: u8,
+        has_headers: bool,
+    ) -> Result<CsvReader<impl Read>, IngestError> {
+        // CSV byte locators are relative to the stream after BOM removal
+        // (documented; the BOM is presentation, not record content).
+        let inner = skip_utf8_bom(inner).map_err(|e| IngestError::io("<csv stream>", e))?;
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(delimiter)
             .has_headers(has_headers)

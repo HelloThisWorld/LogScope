@@ -1,0 +1,6 @@
+timestamp,level,message,component,elapsed_ms
+2024-06-01T10:00:00.100Z,INFO,startup complete,boot,152
+2024-06-01T10:00:01.200Z,WARN,"config value missing, using default",config,3
+2024-06-01T10:00:02.300Z,ERROR,"write failed: disk full
+retrying with backoff",storage,88
+2024-06-01T10:00:03.400Z,INFO,shutdown requested,boot,1

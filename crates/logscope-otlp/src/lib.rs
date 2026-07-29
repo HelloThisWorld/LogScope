@@ -13,10 +13,16 @@ pub use convert::{
     convert_logs, convert_metrics, convert_traces, ConvertContext, ConvertedBatch, OtlpReject,
 };
 pub use error::OtlpError;
-pub use jsonl_file::{read_otlp_jsonl, JsonlEnvelope, JsonlImportResult, JsonlReject};
+pub use jsonl_file::{
+    read_otlp_jsonl, stream_otlp_jsonl, JsonlEnvelope, JsonlImportResult, JsonlReject,
+};
 pub use receiver::{
     start, EnvelopeMeta, EnvelopePayload, OtlpReceiverConfig, OtlpReceiverHandle, ReceivedEnvelope,
 };
 
 /// Parser identity for OTLP conversion (part of deterministic hashes).
 pub const OTLP_PARSER_VERSION: &str = "0.0.1";
+
+/// Re-export so test support and benches build envelopes against the exact
+/// schema version this crate consumes.
+pub use opentelemetry_proto;

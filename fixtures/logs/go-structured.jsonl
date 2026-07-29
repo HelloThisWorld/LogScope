@@ -1,0 +1,3 @@
+{"time":"2024-06-01T10:00:00.111Z","level":"INFO","msg":"worker started","worker_id":3,"queue":"emails"}
+{"time":"2024-06-01T10:00:01.222Z","level":"WARN","msg":"queue depth high","queue":"emails","depth":512}
+{"time":"2024-06-01T10:00:02.333Z","level":"ERROR","msg":"handler panic recovered","error":"runtime error: index out of range [5] with length 3","stack":"goroutine 42 [running]:\nmain.handle(0xc000010200)\n\t/src/app/main.go:87 +0x1a4"}
