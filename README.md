@@ -6,11 +6,14 @@ logs (and later metrics and traces) into deterministic, source-traceable
 datasets you can query on your own machine — no account, no server, no
 network access.
 
-**Status: v0.0 foundation / architecture proof.** The current build proves
-the offline architecture (Tauri + React + Rust + DuckDB + Parquet + SQLite),
-the canonical OTel-aligned data model, atomic imports with cancellation and
-crash recovery, offline full-text search, and OTLP transport equivalence.
-It is not yet the interactive Log Explorer.
+**Status: 0.2.0 — interactive Log Explorer.** Import a log export
+(generic JSONL, CSV, or Elasticsearch/ECS JSONL), then investigate it with
+a versioned query language (free text, phrases, typed comparisons, boolean
+logic, wildcards, linear-time regexes), a UTC histogram with brush zoom,
+facets and field summaries, source-order context with raw excerpts, saved
+searches/columns/recents, and bounded atomic CSV/JSONL export — all under
+one compiled filter, fully offline. See `docs/user/log-explorer.md` and
+`docs/user/query-language.md`.
 
 ## Product profiles
 
@@ -35,9 +38,10 @@ It is not yet the interactive Log Explorer.
 
 ## Repository layout
 
-See `docs/development/v0.0-v0.1-implementation-plan.md` (live status),
-`docs/adr/` (architecture decisions 0001–0010), `fixtures/README.md`
-(synthetic golden fixtures), and `docs/benchmarks/` (measured baselines).
+See `docs/development/v0.2-implementation-plan.md` (live status and the
+0.2 acceptance matrix), `docs/adr/` (architecture decisions 0001–0015),
+`fixtures/README.md` (synthetic golden fixtures), `CHANGELOG.md`, and
+`docs/benchmarks/` (measured baselines, incl. the 1M/5M query baseline).
 
 ## Building
 
@@ -51,13 +55,14 @@ cargo test --workspace --exclude logscope-desktop
 cd apps/desktop && npm install && npm run tauri dev
 
 # portable Windows archive (unsigned, no installer)
-pwsh scripts/package-portable.ps1 -Version 0.0.0
+pwsh scripts/package-portable.ps1 -Version 0.2.0
 ```
 
 Benchmarks (deterministic corpora, generated on demand, never committed):
 
 ```
 cargo run --release -p logscope-testsupport --bin bench_import -- logs 1000000
+cargo run --release -p logscope-testsupport --bin bench_query -- 1000000
 ```
 
 ## License
