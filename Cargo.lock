@@ -2620,6 +2620,7 @@ dependencies = [
  "chrono",
  "crossbeam-channel",
  "flate2",
+ "logscope-case",
  "logscope-ingest",
  "logscope-jobs",
  "logscope-model",
