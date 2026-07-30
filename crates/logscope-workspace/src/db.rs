@@ -16,6 +16,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "0002_explorer",
         include_str!("migrations/0002_explorer.sql"),
     ),
+    (
+        3,
+        "0003_investigations",
+        include_str!("migrations/0003_investigations.sql"),
+    ),
 ];
 
 /// Highest schema version this build can open.

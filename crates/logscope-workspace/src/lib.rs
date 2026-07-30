@@ -4,6 +4,7 @@
 //! database (`workspace.db`), forward-only transactional migrations, and the
 //! crash-safe staging/recovery protocol.
 
+pub mod case_meta;
 pub mod db;
 pub mod error;
 pub mod explorer_meta;
@@ -12,6 +13,10 @@ pub mod manifest;
 pub mod meta;
 pub mod workspace;
 
+pub use case_meta::{
+    HistoryRow, HypothesisRow, InvestigationEdit, InvestigationRow, ItemRow, NewHypothesis,
+    NewInvestigation, NewItem, NewScopeRef, ScopeRefRow,
+};
 pub use error::WorkspaceError;
 pub use explorer_meta::{
     ColumnSetRow, ExportJobRow, FieldStatRow, IndexStateRow, RecentSearchRow, SavedSearchRow,

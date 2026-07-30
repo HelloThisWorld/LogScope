@@ -2640,6 +2640,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "logscope-case"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "uuid",
+]
+
+[[package]]
 name = "logscope-desktop"
 version = "0.2.0"
 dependencies = [
