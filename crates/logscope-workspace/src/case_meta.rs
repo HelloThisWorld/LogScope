@@ -99,6 +99,42 @@ pub struct ItemRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceRow {
+    pub evidence_id: String,
+    pub investigation_id: String,
+    pub envelope_version: i64,
+    pub kind: String,
+    pub signal: String,
+    pub title: String,
+    pub annotation: Option<String>,
+    pub relevance: Option<String>,
+    pub captured_investigation_revision: i64,
+    pub group_id: Option<String>,
+    pub position: i64,
+    pub supersedes_evidence_id: Option<String>,
+    pub archived: bool,
+    pub resolver_state: String,
+    pub resolver_detail_json: String,
+    pub last_verified_at: Option<String>,
+    pub reference_json: String,
+    pub snapshot_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceGroupRow {
+    pub group_id: String,
+    pub investigation_id: String,
+    pub name: String,
+    pub position: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryRow {
     pub history_id: i64,
     pub investigation_id: Option<String>,
@@ -177,6 +213,26 @@ pub struct NewItem {
     pub content: String,
     pub task_status: Option<String>,
     pub question_status: Option<String>,
+}
+
+/// Pin input. `reference_json`/`snapshot_json` are produced by the
+/// service layer from the typed `logscope-case` envelope (validated and
+/// bounded there); the repository stores them verbatim.
+#[derive(Debug, Clone)]
+pub struct NewEvidence {
+    pub evidence_id: String,
+    pub investigation_id: String,
+    pub envelope_version: i64,
+    pub kind: String,
+    pub signal: String,
+    pub title: String,
+    pub annotation: Option<String>,
+    pub relevance: Option<String>,
+    pub captured_investigation_revision: i64,
+    pub group_id: Option<String>,
+    pub supersedes_evidence_id: Option<String>,
+    pub reference_json: String,
+    pub snapshot_json: String,
 }
 
 // ---- shared helpers ---------------------------------------------------------
@@ -1258,5 +1314,488 @@ fn map_history(r: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryRow> {
         payload_json: r.get(6)?,
         detail_json: r.get(7)?,
         created_at: r.get(8)?,
+    })
+}
+
+// ---- evidence storage ---------------------------------------------------------
+
+const EVIDENCE_COLS: &str = "evidence_id, investigation_id, envelope_version, kind, signal, \
+     title, annotation, relevance, captured_investigation_revision, group_id, position, \
+     supersedes_evidence_id, archived, resolver_state, resolver_detail_json, last_verified_at, \
+     reference_json, snapshot_json, created_at, updated_at, revision";
+
+fn map_evidence(r: &rusqlite::Row<'_>) -> rusqlite::Result<EvidenceRow> {
+    Ok(EvidenceRow {
+        evidence_id: r.get(0)?,
+        investigation_id: r.get(1)?,
+        envelope_version: r.get(2)?,
+        kind: r.get(3)?,
+        signal: r.get(4)?,
+        title: r.get(5)?,
+        annotation: r.get(6)?,
+        relevance: r.get(7)?,
+        captured_investigation_revision: r.get(8)?,
+        group_id: r.get(9)?,
+        position: r.get(10)?,
+        supersedes_evidence_id: r.get(11)?,
+        archived: r.get::<_, i64>(12)? != 0,
+        resolver_state: r.get(13)?,
+        resolver_detail_json: r.get(14)?,
+        last_verified_at: r.get(15)?,
+        reference_json: r.get(16)?,
+        snapshot_json: r.get(17)?,
+        created_at: r.get(18)?,
+        updated_at: r.get(19)?,
+        revision: r.get(20)?,
+    })
+}
+
+fn get_evidence_tx(tx: &Transaction<'_>, id: &str) -> Result<EvidenceRow, WorkspaceError> {
+    tx.query_row(
+        &format!("SELECT {EVIDENCE_COLS} FROM evidence WHERE evidence_id = ?1"),
+        params![id],
+        map_evidence,
+    )
+    .optional()?
+    .ok_or_else(|| WorkspaceError::MissingEntity {
+        kind: "evidence",
+        id: id.to_string(),
+    })
+}
+
+impl MetaDb {
+    // ---- evidence groups ----------------------------------------------------
+
+    pub fn create_evidence_group(
+        &self,
+        group_id: &str,
+        investigation_id: &str,
+        name: &str,
+    ) -> Result<EvidenceGroupRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let position = next_position(&tx, "evidence_groups", investigation_id)?;
+        let ts = now();
+        tx.execute(
+            "INSERT INTO evidence_groups
+               (group_id, investigation_id, name, position, created_at, updated_at, revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, 1)",
+            params![group_id, investigation_id, name, position, ts],
+        )?;
+        let row = get_group_tx(&tx, group_id)?;
+        record_history(
+            &tx,
+            Some(investigation_id),
+            "evidence_group",
+            group_id,
+            1,
+            "created",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn rename_evidence_group(
+        &self,
+        group_id: &str,
+        expected_revision: i64,
+        name: &str,
+    ) -> Result<EvidenceGroupRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE evidence_groups SET name = ?1, updated_at = ?2, revision = revision + 1
+             WHERE group_id = ?3 AND revision = ?4",
+            params![name, now(), group_id, expected_revision],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "evidence_groups",
+                "group_id",
+                "evidence_group",
+                group_id,
+                expected_revision,
+            ));
+        }
+        let row = get_group_tx(&tx, group_id)?;
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "evidence_group",
+            group_id,
+            row.revision,
+            "edited",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    /// Deleting a group never touches its members' evidence rows beyond
+    /// clearing the pointer (FK `ON DELETE SET NULL`); the final group
+    /// payload stays in history.
+    pub fn delete_evidence_group(&self, group_id: &str) -> Result<(), WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let row = get_group_tx(&tx, group_id)?;
+        tx.execute(
+            "DELETE FROM evidence_groups WHERE group_id = ?1",
+            params![group_id],
+        )?;
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "evidence_group",
+            group_id,
+            row.revision,
+            "removed",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_evidence_groups(
+        &self,
+        investigation_id: &str,
+    ) -> Result<Vec<EvidenceGroupRow>, WorkspaceError> {
+        let conn = self.raw();
+        let mut stmt = conn.prepare(
+            "SELECT group_id, investigation_id, name, position, created_at, updated_at, revision
+             FROM evidence_groups WHERE investigation_id = ?1 ORDER BY position, created_at",
+        )?;
+        let rows = stmt
+            .query_map(params![investigation_id], map_group)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    // ---- evidence -------------------------------------------------------------
+
+    /// Stores a pinned evidence item (action `pinned`). The typed
+    /// reference and bounded snapshot were validated by the service layer.
+    pub fn insert_evidence(&self, new: &NewEvidence) -> Result<EvidenceRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let row = insert_evidence_tx(&tx, new, "pinned")?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn get_evidence(&self, id: &str) -> Result<Option<EvidenceRow>, WorkspaceError> {
+        let conn = self.raw();
+        Ok(conn
+            .query_row(
+                &format!("SELECT {EVIDENCE_COLS} FROM evidence WHERE evidence_id = ?1"),
+                params![id],
+                map_evidence,
+            )
+            .optional()?)
+    }
+
+    pub fn list_evidence(
+        &self,
+        investigation_id: &str,
+        include_archived: bool,
+    ) -> Result<Vec<EvidenceRow>, WorkspaceError> {
+        let conn = self.raw();
+        let sql = format!(
+            "SELECT {EVIDENCE_COLS} FROM evidence WHERE investigation_id = ?1 {}
+             ORDER BY position, created_at",
+            if include_archived {
+                ""
+            } else {
+                "AND archived = 0"
+            }
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params![investigation_id], map_evidence)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Edits display metadata (title/annotation/relevance). The reference
+    /// and snapshot are immutable through this path.
+    pub fn update_evidence_annotation(
+        &self,
+        id: &str,
+        expected_revision: i64,
+        title: &str,
+        annotation: Option<&str>,
+        relevance: Option<&str>,
+    ) -> Result<EvidenceRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE evidence SET title = ?1, annotation = ?2, relevance = ?3,
+                updated_at = ?4, revision = revision + 1
+             WHERE evidence_id = ?5 AND revision = ?6",
+            params![title, annotation, relevance, now(), id, expected_revision],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "evidence",
+                "evidence_id",
+                "evidence",
+                id,
+                expected_revision,
+            ));
+        }
+        let row = get_evidence_tx(&tx, id)?;
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "evidence",
+            id,
+            row.revision,
+            "edited",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn set_evidence_group(
+        &self,
+        id: &str,
+        expected_revision: i64,
+        group_id: Option<&str>,
+    ) -> Result<EvidenceRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE evidence SET group_id = ?1, updated_at = ?2, revision = revision + 1
+             WHERE evidence_id = ?3 AND revision = ?4",
+            params![group_id, now(), id, expected_revision],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "evidence",
+                "evidence_id",
+                "evidence",
+                id,
+                expected_revision,
+            ));
+        }
+        let row = get_evidence_tx(&tx, id)?;
+        let detail = serde_json::json!({ "group_id": group_id }).to_string();
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "evidence",
+            id,
+            row.revision,
+            "edited",
+            &payload(&row)?,
+            &detail,
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    /// Normal removal path: archive (tombstoned via history), restorable.
+    pub fn set_evidence_archived(
+        &self,
+        id: &str,
+        expected_revision: i64,
+        archived: bool,
+    ) -> Result<EvidenceRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE evidence SET archived = ?1, updated_at = ?2, revision = revision + 1
+             WHERE evidence_id = ?3 AND revision = ?4",
+            params![archived as i64, now(), id, expected_revision],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "evidence",
+                "evidence_id",
+                "evidence",
+                id,
+                expected_revision,
+            ));
+        }
+        let row = get_evidence_tx(&tx, id)?;
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "evidence",
+            id,
+            row.revision,
+            if archived { "archived" } else { "restored" },
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    /// Pins `new` as a superseding item for `superseded_id` in one
+    /// transaction. The earlier item and its revisions stay untouched and
+    /// visible; a `superseded` history event records the link on the old
+    /// entity.
+    pub fn supersede_evidence(
+        &self,
+        new: &NewEvidence,
+        superseded_id: &str,
+    ) -> Result<EvidenceRow, WorkspaceError> {
+        if new.supersedes_evidence_id.as_deref() != Some(superseded_id) {
+            return Err(WorkspaceError::Invalid(
+                "supersede_evidence requires new.supersedes_evidence_id to name the old item"
+                    .into(),
+            ));
+        }
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let old = get_evidence_tx(&tx, superseded_id)?;
+        let row = insert_evidence_tx(&tx, new, "pinned")?;
+        let detail = serde_json::json!({ "superseded_by": new.evidence_id }).to_string();
+        record_history(
+            &tx,
+            Some(&old.investigation_id),
+            "evidence",
+            superseded_id,
+            old.revision,
+            "superseded",
+            &payload(&old)?,
+            &detail,
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    /// Records a verification outcome. This touches ONLY the resolver
+    /// columns: it never bumps the content revision, never rewrites the
+    /// captured snapshot or reference, and writes no per-item history
+    /// (a batch verification records one investigation-level `verified`
+    /// event via [`MetaDb::record_verification_run`]).
+    pub fn update_evidence_resolution(
+        &self,
+        id: &str,
+        resolver_state: &str,
+        resolver_detail_json: &str,
+        verified_at: &str,
+    ) -> Result<(), WorkspaceError> {
+        let conn = self.raw();
+        let n = conn.execute(
+            "UPDATE evidence SET resolver_state = ?1, resolver_detail_json = ?2,
+                last_verified_at = ?3
+             WHERE evidence_id = ?4",
+            params![resolver_state, resolver_detail_json, verified_at, id],
+        )?;
+        if n == 0 {
+            return Err(WorkspaceError::MissingEntity {
+                kind: "evidence",
+                id: id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// One activity event summarizing a (batch) verification run.
+    pub fn record_verification_run(
+        &self,
+        investigation_id: &str,
+        detail_json: &str,
+    ) -> Result<(), WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let row = get_investigation_tx(&tx, investigation_id)?;
+        record_history(
+            &tx,
+            Some(investigation_id),
+            "investigation",
+            investigation_id,
+            row.revision,
+            "verified",
+            &payload(&row)?,
+            detail_json,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+fn insert_evidence_tx(
+    tx: &Transaction<'_>,
+    new: &NewEvidence,
+    action: &str,
+) -> Result<EvidenceRow, WorkspaceError> {
+    let position = next_position(tx, "evidence", &new.investigation_id)?;
+    let ts = now();
+    tx.execute(
+        "INSERT INTO evidence
+           (evidence_id, investigation_id, envelope_version, kind, signal, title,
+            annotation, relevance, captured_investigation_revision, group_id, position,
+            supersedes_evidence_id, archived, resolver_state, resolver_detail_json,
+            last_verified_at, reference_json, snapshot_json, created_at, updated_at, revision)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, 'unverified', '{}',
+                 NULL, ?13, ?14, ?15, ?15, 1)",
+        params![
+            new.evidence_id,
+            new.investigation_id,
+            new.envelope_version,
+            new.kind,
+            new.signal,
+            new.title,
+            new.annotation,
+            new.relevance,
+            new.captured_investigation_revision,
+            new.group_id,
+            position,
+            new.supersedes_evidence_id,
+            new.reference_json,
+            new.snapshot_json,
+            ts,
+        ],
+    )?;
+    let row = get_evidence_tx(tx, &new.evidence_id)?;
+    record_history(
+        tx,
+        Some(&new.investigation_id),
+        "evidence",
+        &new.evidence_id,
+        1,
+        action,
+        &payload(&row)?,
+        "{}",
+    )?;
+    Ok(row)
+}
+
+fn map_group(r: &rusqlite::Row<'_>) -> rusqlite::Result<EvidenceGroupRow> {
+    Ok(EvidenceGroupRow {
+        group_id: r.get(0)?,
+        investigation_id: r.get(1)?,
+        name: r.get(2)?,
+        position: r.get(3)?,
+        created_at: r.get(4)?,
+        updated_at: r.get(5)?,
+        revision: r.get(6)?,
+    })
+}
+
+fn get_group_tx(tx: &Transaction<'_>, id: &str) -> Result<EvidenceGroupRow, WorkspaceError> {
+    tx.query_row(
+        "SELECT group_id, investigation_id, name, position, created_at, updated_at, revision
+         FROM evidence_groups WHERE group_id = ?1",
+        params![id],
+        map_group,
+    )
+    .optional()?
+    .ok_or_else(|| WorkspaceError::MissingEntity {
+        kind: "evidence_group",
+        id: id.to_string(),
     })
 }

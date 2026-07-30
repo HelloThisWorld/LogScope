@@ -17,4 +17,5 @@ parking_lot.workspace = true
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 
 [dev-dependencies]
+logscope-case.workspace = true
 tempfile.workspace = true

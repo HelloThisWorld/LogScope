@@ -2,8 +2,11 @@
 //! concurrency, transactional rollback, and the v2 -> v3 workspace schema
 //! migration.
 
+use logscope_case::envelope::{
+    self, EventRef, EventSnapshot, EvidenceReference, EvidenceSnapshot, SnapshotRow,
+};
 use logscope_workspace::case_meta::{
-    InvestigationEdit, NewHypothesis, NewInvestigation, NewItem, NewScopeRef,
+    InvestigationEdit, NewEvidence, NewHypothesis, NewInvestigation, NewItem, NewScopeRef,
 };
 use logscope_workspace::{MetaDb, WorkspaceError};
 use rusqlite::Connection;
@@ -456,6 +459,172 @@ fn no_os_identity_is_captured_anywhere() {
             "history must not auto-capture the OS identity"
         );
     }
+}
+
+fn typed_event_evidence(evidence_id: &str, investigation_id: &str) -> NewEvidence {
+    let reference = EvidenceReference::Event(EventRef {
+        record_id: "log-0123456789abcdef0123456789abcdef".into(),
+        dataset_id: "ds-1".into(),
+        dataset_revision: "dsrev-abc".into(),
+        segment_id: Some("seg-1".into()),
+        source_file_id: Some("file-1".into()),
+        source_content_hash: Some("blake3-hash".into()),
+        source_locator_json: Some("{\"record_number\":42}".into()),
+        profile_id: Some("builtin.jsonl".into()),
+        profile_version: Some("1".into()),
+        parser_id: "jsonl".into(),
+        parser_version: "1".into(),
+        event_time: Some(1_700_000_000_000_000_000),
+        timestamp_quality: vec![],
+    });
+    envelope::validate_reference(&reference).unwrap();
+    let snapshot = EvidenceSnapshot::Event(EventSnapshot {
+        row: SnapshotRow {
+            record_id: "log-0123456789abcdef0123456789abcdef".into(),
+            event_time: Some(1_700_000_000_000_000_000),
+            severity_text: Some("ERROR".into()),
+            severity_number: Some(17),
+            display_message: "connection reset by peer".into(),
+            display_message_truncated: false,
+            fields: vec![],
+        },
+        raw_excerpt: None,
+        raw_excerpt_truncated: false,
+    });
+    NewEvidence {
+        evidence_id: evidence_id.into(),
+        investigation_id: investigation_id.into(),
+        envelope_version: logscope_case::EVIDENCE_ENVELOPE_VERSION,
+        kind: "event".into(),
+        signal: "log".into(),
+        title: "First reset error".into(),
+        annotation: Some("first occurrence after the deploy".into()),
+        relevance: Some("marks the start of the incident window".into()),
+        captured_investigation_revision: 1,
+        group_id: None,
+        supersedes_evidence_id: None,
+        reference_json: envelope::encode_reference(&reference).unwrap(),
+        snapshot_json: envelope::encode_snapshot(&snapshot).unwrap(),
+    }
+}
+
+#[test]
+fn evidence_pin_edit_group_archive_and_supersede() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MetaDb::open(&dir.path().join("workspace.db")).unwrap();
+    db.create_investigation(&new_inv("inv-ev", "Evidence storage"))
+        .unwrap();
+
+    // Pin: stable id, envelope v1, typed reference + bounded snapshot.
+    let ev = db
+        .insert_evidence(&typed_event_evidence("ev-a", "inv-ev"))
+        .unwrap();
+    assert_eq!(ev.revision, 1);
+    assert_eq!(ev.resolver_state, "unverified");
+    assert_eq!(ev.envelope_version, 1);
+
+    // The stored live reference decodes back to the typed form.
+    match envelope::decode_reference(ev.envelope_version, &ev.reference_json) {
+        envelope::DecodeOutcome::Decoded(EvidenceReference::Event(e)) => {
+            assert_eq!(e.dataset_revision, "dsrev-abc");
+            assert_eq!(e.parser_id, "jsonl");
+        }
+        other => panic!("expected decoded event reference, got {other:?}"),
+    }
+
+    // Edit annotation: revision bumps, snapshot bytes stay identical.
+    let edited = db
+        .update_evidence_annotation("ev-a", 1, "First reset error", Some("updated note"), None)
+        .unwrap();
+    assert_eq!(edited.revision, 2);
+    assert_eq!(edited.snapshot_json, ev.snapshot_json);
+    assert_eq!(edited.reference_json, ev.reference_json);
+
+    // Grouping.
+    let g = db
+        .create_evidence_group("evg-1", "inv-ev", "Deploy window")
+        .unwrap();
+    let grouped = db.set_evidence_group("ev-a", 2, Some(&g.group_id)).unwrap();
+    assert_eq!(grouped.group_id.as_deref(), Some("evg-1"));
+    // Deleting the group clears the pointer without touching evidence
+    // content or history.
+    db.delete_evidence_group("evg-1").unwrap();
+    let after = db.get_evidence("ev-a").unwrap().unwrap();
+    assert_eq!(after.group_id, None);
+    assert_eq!(after.snapshot_json, ev.snapshot_json);
+
+    // Supersession: the old item and its history stay intact and visible.
+    let mut newer = typed_event_evidence("ev-b", "inv-ev");
+    newer.supersedes_evidence_id = Some("ev-a".into());
+    newer.title = "Corrected pin (later occurrence)".into();
+    let newer = db.supersede_evidence(&newer, "ev-a").unwrap();
+    assert_eq!(newer.supersedes_evidence_id.as_deref(), Some("ev-a"));
+    let old = db.get_evidence("ev-a").unwrap().unwrap();
+    assert!(
+        !old.archived,
+        "supersession never deletes or hides the old item"
+    );
+    let old_hist = db.list_entity_history("evidence", "ev-a").unwrap();
+    assert_eq!(old_hist.last().unwrap().action, "superseded");
+
+    // Archive = normal removal, restorable, history-tombstoned.
+    let archived = db
+        .set_evidence_archived("ev-a", old.revision, true)
+        .unwrap();
+    assert!(archived.archived);
+    assert_eq!(db.list_evidence("inv-ev", false).unwrap().len(), 1);
+    assert_eq!(db.list_evidence("inv-ev", true).unwrap().len(), 2);
+
+    // Stale guard works on evidence too.
+    let err = db
+        .update_evidence_annotation("ev-b", 99, "x", None, None)
+        .unwrap_err();
+    assert!(matches!(err, WorkspaceError::StaleRevision { .. }));
+}
+
+#[test]
+fn verification_updates_only_resolver_columns_and_never_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MetaDb::open(&dir.path().join("workspace.db")).unwrap();
+    db.create_investigation(&new_inv("inv-vr", "Resolver hygiene"))
+        .unwrap();
+    let ev = db
+        .insert_evidence(&typed_event_evidence("ev-v", "inv-vr"))
+        .unwrap();
+    let history_before = db.list_entity_history("evidence", "ev-v").unwrap().len();
+
+    db.update_evidence_resolution(
+        "ev-v",
+        "source_changed",
+        "{\"expected\":\"blake3-hash\",\"found\":\"other\"}",
+        "2026-07-30T12:00:00Z",
+    )
+    .unwrap();
+
+    let after = db.get_evidence("ev-v").unwrap().unwrap();
+    assert_eq!(after.resolver_state, "source_changed");
+    assert_eq!(
+        after.last_verified_at.as_deref(),
+        Some("2026-07-30T12:00:00Z")
+    );
+    // Content untouched: same revision, byte-identical snapshot/reference,
+    // and no per-item history entry was added by verification.
+    assert_eq!(after.revision, ev.revision);
+    assert_eq!(after.snapshot_json, ev.snapshot_json);
+    assert_eq!(after.reference_json, ev.reference_json);
+    assert_eq!(
+        db.list_entity_history("evidence", "ev-v").unwrap().len(),
+        history_before
+    );
+
+    // The batch run records one investigation-level activity event.
+    db.record_verification_run(
+        "inv-vr",
+        "{\"checked\":1,\"verified\":0,\"source_changed\":1}",
+    )
+    .unwrap();
+    let activity = db.list_investigation_activity("inv-vr", 10).unwrap();
+    assert_eq!(activity[0].action, "verified");
 }
 
 #[test]

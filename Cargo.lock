@@ -2833,6 +2833,7 @@ name = "logscope-workspace"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "logscope-case",
  "logscope-model",
  "parking_lot",
  "rusqlite",
