@@ -1,35 +1,30 @@
 name: CI
 
-# All jobs run on GitHub-hosted runners with aggressively shared caches.
+# All routine CI (format, lint, full tests, desktop shell smoke) runs on
+# the personal macOS self-hosted runner (Apple Silicon). GitHub-hosted
+# runners are used ONLY by the on-demand Windows packaging job below.
+#
+# SECURITY RED LINE: a self-hosted runner must never serve a public
+# repository. If this repo is ever made public, move every job back to
+# GitHub-hosted runners BEFORE changing visibility — public-repo pull
+# requests would otherwise execute untrusted code on personal hardware.
 #
 # Trigger design:
-# - pull_request: the validation path (lint + tests; no packaging).
-# - workflow_dispatch: full on-demand run including the portable ZIP;
-#   running it on main also (re)seeds main's cache scope.
-# - push to main, filtered to Cargo.lock / this file: ordinary merges do
-#   NOT rebuild (the PR already validated the same tree) — only merges
-#   that change the dependency graph or the CI definition run, which is
-#   exactly when main's caches need refreshing.
-# - weekly schedule: GitHub evicts caches unused for ~7 days; a weekly
-#   warm run keeps main's cache scope alive (and picks up new stable
-#   toolchains). With warm caches it is short and cheap.
+# - pull_request: the validation path.
+# - workflow_dispatch: on-demand run; also the only way to run the
+#   Windows packaging job.
+# - No push-to-main build: an ordinary merge was already validated by
+#   its PR. No cache cron either — the self-hosted runner keeps its
+#   Cargo target directory warm on local disk between runs, so there is
+#   no hosted-cache scope to seed or refresh.
 #
-# Cold-start avoidance: rust-cache keys include the branch-independent
-# `shared-key` below plus toolchain/lockfile hashes, and PR branches may
-# restore caches saved on main. Keeping main's scope warm therefore
-# gives every new PR branch a full (exact-key) cache hit instead of a
-# 40-60 minute cold build of the bundled native deps (DuckDB C++,
-# Arrow, SQLite).
+# Runner prerequisites (installed on the Mac, not by this workflow):
+# rustup with the stable toolchain (rustfmt + clippy), Xcode Command
+# Line Tools (C/C++ for the bundled DuckDB/SQLite builds), Node.js 22+.
+
 on:
   pull_request:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "Cargo.lock"
-      - ".github/workflows/ci.yml"
-  schedule:
-    - cron: "0 19 * * 0" # Mon 03:00 UTC+8 — weekly cache refresh
 
 # A newer push to the same branch/PR supersedes the previous run.
 concurrency:
@@ -39,71 +34,28 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  # MSVC PDB generation dominates link time and nobody debugs CI test
-  # binaries; drop dev-profile debuginfo (release profile is untouched).
+  # Nobody debugs CI test binaries; dropping dev-profile debuginfo cuts
+  # build time and disk churn (release profile is untouched).
   CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
-  lint:
-    name: Format and lint (Windows)
-    runs-on: windows-latest
+  mac-ci:
+    # One serial job on the single runner: separate jobs would only add
+    # checkouts and queueing, and one job keeps one warm target dir.
+    name: Lint + tests + shell smoke (macOS self-hosted)
+    runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: win-lint
-          cache-on-failure: true
+      - name: Toolchain versions (fails fast if the Mac is missing one)
+        run: |
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
+          node --version
+          npm --version
       - run: cargo fmt --check
       - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
-
-  test-windows:
-    name: Tests (Windows)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: win-test
-          cache-on-failure: true
       - run: cargo test --workspace --exclude logscope-desktop
-
-  core-linux:
-    name: Shared-core tests (Linux)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-core
-          cache-on-failure: true
-      # Platform-neutral core: model, normalization, jobs, workspace,
-      # ingest, storage. (DuckDB-dependent query tests run on the desktop
-      # OS jobs to keep this job fast.)
-      - run: >
-          cargo test -p logscope-model -p logscope-normalize -p logscope-jobs
-          -p logscope-workspace -p logscope-ingest -p logscope-store
-
-  core-macos:
-    name: Shared-core tests + shell build smoke (macOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: macos-core
-          cache-on-failure: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: >
-          cargo test -p logscope-model -p logscope-normalize -p logscope-jobs
-          -p logscope-workspace -p logscope-ingest -p logscope-store
       - name: Frontend build
         working-directory: apps/desktop
         run: |
@@ -115,7 +67,9 @@ jobs:
   package-windows:
     # On demand only (workflow_dispatch): PR iteration does not need a
     # cloud-built archive and release packaging is driven locally via
-    # scripts/package-portable.ps1.
+    # scripts/package-portable.ps1. Stays on a hosted Windows runner —
+    # Windows artifacts cannot be produced on the macOS runner — so it
+    # requires available GitHub-hosted minutes when dispatched.
     name: Portable ZIP (Windows, unsigned)
     if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
