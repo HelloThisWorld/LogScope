@@ -46,6 +46,13 @@ jobs:
     runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
+      - name: Put user toolchains on PATH
+        # The runner service starts with a minimal PATH; rustup installs
+        # to ~/.cargo/bin and Homebrew (Apple Silicon) to /opt/homebrew.
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
       - name: Toolchain versions (fails fast if the Mac is missing one)
         run: |
           rustup show active-toolchain
