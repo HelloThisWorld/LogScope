@@ -314,9 +314,13 @@ fn pre_v02_workspace_migrates_and_stays_searchable() {
     )
     .unwrap();
 
-    // Step 3: open with the 0.2 build → transactional migration to v2.
+    // Step 3: open with the current build → transactional migration to
+    // the latest supported schema (v2 under 0.2, v3 under 0.3).
     let ws = Workspace::open(&v1_root, "0.2.0-test").unwrap();
-    assert_eq!(ws.manifest.schema_version, 2);
+    assert_eq!(
+        ws.manifest.schema_version,
+        logscope_workspace::db::supported_schema_version()
+    );
     assert_eq!(
         ws.meta.get_info("v1-marker").unwrap().as_deref(),
         Some("kept"),

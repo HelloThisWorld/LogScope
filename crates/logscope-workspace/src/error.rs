@@ -24,6 +24,14 @@ pub enum WorkspaceError {
     Manifest(#[from] serde_json::Error),
     #[error("invalid argument: {0}")]
     Invalid(String),
+    #[error("stale revision for {kind} {id}: expected {expected}, store has moved on")]
+    StaleRevision {
+        kind: &'static str,
+        id: String,
+        expected: i64,
+    },
+    #[error("{kind} not found: {id}")]
+    MissingEntity { kind: &'static str, id: String },
 }
 
 impl WorkspaceError {
@@ -45,6 +53,8 @@ impl WorkspaceError {
             WorkspaceError::Io { .. } => "workspace/io",
             WorkspaceError::Manifest(_) => "workspace/manifest",
             WorkspaceError::Invalid(_) => "workspace/invalid-argument",
+            WorkspaceError::StaleRevision { .. } => "workspace/stale-revision",
+            WorkspaceError::MissingEntity { .. } => "workspace/missing-entity",
         }
     }
 }

@@ -1,0 +1,12 @@
+[package]
+name = "logscope-case"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Platform-neutral investigation-workbench domain: typed vocabulary, id minting, evidence envelope, and (later) report/redaction/bundle contracts"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }

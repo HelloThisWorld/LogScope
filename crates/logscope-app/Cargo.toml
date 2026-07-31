@@ -6,6 +6,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+logscope-case.workspace = true
 logscope-model.workspace = true
 logscope-normalize.workspace = true
 logscope-workspace.workspace = true

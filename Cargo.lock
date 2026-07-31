@@ -2620,6 +2620,7 @@ dependencies = [
  "chrono",
  "crossbeam-channel",
  "flate2",
+ "logscope-case",
  "logscope-ingest",
  "logscope-jobs",
  "logscope-model",
@@ -2636,6 +2637,16 @@ dependencies = [
  "thiserror 2.0.19",
  "tracing",
  "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "logscope-case"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
  "uuid",
 ]
 
@@ -2823,6 +2834,7 @@ name = "logscope-workspace"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "logscope-case",
  "logscope-model",
  "parking_lot",
  "rusqlite",

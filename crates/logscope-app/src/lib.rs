@@ -4,11 +4,18 @@
 //! shell, future CLI, and Agent API all call these services so UI and
 //! automation share exactly the same semantics.
 
+pub mod case;
 pub mod dto;
 pub mod explorer;
 pub mod export;
 pub mod import;
 
+pub use case::{
+    dataset_revision, pin_event, pin_group, pin_interval, pin_item, pin_query, pin_selection,
+    verify_evidence, EvidenceOutcome, PinCommon, PinEventRequest, PinGroupRequest,
+    PinIntervalRequest, PinItemRequest, PinQueryRequest, PinSelectionRequest, QueryScope,
+    VerificationReport,
+};
 pub use export::{
     run_export, ExportFormat, ExportOutcome, ExportSpec, DEFAULT_CSV_COLUMNS, DEFAULT_EXPORT_BYTES,
     DEFAULT_EXPORT_ROWS, MAX_EXPORT_BYTES, MAX_EXPORT_ROWS,

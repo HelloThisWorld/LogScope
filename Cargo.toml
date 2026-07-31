@@ -9,6 +9,7 @@ members = [
     "crates/logscope-store",
     "crates/logscope-query-lang",
     "crates/logscope-query",
+    "crates/logscope-case",
     "crates/logscope-otlp",
     "crates/logscope-app",
     "crates/logscope-testsupport",
@@ -30,6 +31,7 @@ logscope-ingest = { path = "crates/logscope-ingest" }
 logscope-store = { path = "crates/logscope-store" }
 logscope-query-lang = { path = "crates/logscope-query-lang" }
 logscope-query = { path = "crates/logscope-query" }
+logscope-case = { path = "crates/logscope-case" }
 logscope-otlp = { path = "crates/logscope-otlp" }
 logscope-app = { path = "crates/logscope-app" }
 logscope-testsupport = { path = "crates/logscope-testsupport" }
