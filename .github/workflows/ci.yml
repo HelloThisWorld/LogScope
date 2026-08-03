@@ -100,17 +100,28 @@ jobs:
     runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
+      - name: Put user toolchains on PATH
+        # The runner service starts with a minimal PATH, exactly as in the
+        # macOS job above. Docker Desktop installs its CLI outside that
+        # PATH, so without this the job reports "Docker is not installed"
+        # on a host where Docker is installed and running.
+        run: |
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.docker/bin" >> "$GITHUB_PATH"
       - name: Verify Docker is available
         # Fail fast with an actionable message rather than a confusing
         # "command not found" halfway through the job.
         run: |
           if ! command -v docker >/dev/null 2>&1; then
-            echo "::error::Docker is not installed on the self-hosted macOS runner." >&2
-            echo "Install Docker Desktop (or colima) on the runner host to enable this leg." >&2
+            echo "::error::docker was not found on PATH: $PATH" >&2
+            echo "Install Docker Desktop or colima on the runner host, or add its bin dir above." >&2
             exit 1
           fi
-          docker version --format '{{.Server.Version}}' || {
-            echo "::error::Docker is installed but its daemon is not running." >&2
+          echo "docker CLI: $(command -v docker)"
+          docker version --format 'server {{.Server.Version}}' || {
+            echo "::error::The docker CLI is present but its daemon is not reachable." >&2
+            echo "Start Docker Desktop (or 'colima start') on the runner host." >&2
             exit 1
           }
       - name: Shared-core clippy + tests in a Linux container

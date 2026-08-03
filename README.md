@@ -7,14 +7,21 @@
 
 [**Open the latest release and download LogScope for x64**](https://github.com/HelloThisWorld/LogScope/releases/latest)
 
-The latest Release page provides the Portable ZIP, release notes, and the
-SHA-256 checksum together.
+The latest Release page provides the Setup executable, the Portable ZIP,
+release notes, and SHA-256 checksums together.
 
-There is no installer and no Setup EXE. LogScope ships only as an ordinary
-relocatable ZIP, so nothing is signed and Windows may display an Unknown
-Publisher or SmartScreen warning when the executable first runs. Download only
-from the official release above and verify the `.sha256` sidecar published
-alongside the archive.
+**Setup is a graphical extractor, not an installer.** It is a small launcher
+with the same payload appended — the same idea as a self-contained Java
+archive. It asks where to put LogScope, extracts, verifies every file against
+`package-manifest.json`, and stops. It creates no MSI/MSIX transaction, no
+registered uninstaller, no service, scheduled task, startup entry, firewall
+rule, `PATH` entry, file association or mandatory registry state, and it needs
+no administrator rights. To remove LogScope, delete the folder.
+
+Both artifacts carry a byte-identical payload, so it makes no difference which
+you choose. Nothing is signed, so Windows may display an Unknown Publisher or
+SmartScreen warning. Download only from the official release above and verify
+the `.sha256` sidecar published alongside each artifact.
 
 **Status: 0.2.2 — early development.** LogScope is not feature complete and is
 not a 1.0 product. Only the Log Explorer half of one profile works today; see
@@ -27,11 +34,15 @@ into deterministic, source-traceable datasets you can query on your own machine
 
 ## Distribution
 
-The only distribution is an unsigned, relocatable Portable ZIP. For a version
-`<version>`, the only recommended application download is:
+Both distributions are unsigned and relocatable. For a version `<version>`:
 
-- `LogScope-<version>-windows-x64-portable.zip` — extract and run without
-  installation.
+- `LogScope-<version>-windows-x64-setup.exe` — graphical extractor: pick a
+  folder, watch progress, every file verified against its manifest;
+- `LogScope-<version>-windows-x64-portable.zip` — ordinary ZIP: extract and run.
+
+The setup executable embeds that exact ZIP byte-for-byte, and packaging fails
+closed if the two ever diverge, so the resulting application tree is identical
+either way.
 
 The current source version is `0.2.2`. See the
 [latest official Release](https://github.com/HelloThisWorld/LogScope/releases/latest)

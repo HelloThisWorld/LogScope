@@ -13,6 +13,7 @@ members = [
     "crates/logscope-otlp",
     "crates/logscope-app",
     "crates/logscope-testsupport",
+    "tools/logscope-setup",
     "apps/desktop/src-tauri",
 ]
 

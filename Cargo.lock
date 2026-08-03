@@ -2790,6 +2790,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "logscope-setup"
+version = "0.2.2"
+dependencies = [
+ "rfd",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "windows",
+ "zip 8.6.0",
+]
+
+[[package]]
 name = "logscope-store"
 version = "0.2.2"
 dependencies = [

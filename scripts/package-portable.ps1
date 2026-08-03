@@ -154,8 +154,51 @@ $zipStream.Dispose()
 $zipHash = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
 "$zipHash *$archiveName.zip" | Set-Content -Encoding ascii "$zipPath.sha256"
 
+# --- Graphical extractor: stub + appended payload (ADR-0018) --------------
+# The setup executable is the logscope-setup stub with THIS EXACT ZIP
+# appended, followed by a fixed trailer. Byte-equivalence between the two
+# public artifacts is therefore a property of construction, not a
+# coincidence - and it is asserted below rather than assumed.
+if (-not $SkipBuild) {
+    Write-Host "Building the graphical extractor stub..."
+    cargo build --release -p logscope-setup
+    if ($LASTEXITCODE -ne 0) { throw "logscope-setup build failed" }
+}
+$stub = Join-Path $repo "target/release/logscope-setup.exe"
+if (-not (Test-Path $stub)) { throw "missing $stub" }
+
+$setupName = "LogScope-$Version-windows-x64-setup.exe"
+$setupPath = Join-Path $outDir $setupName
+if (Test-Path $setupPath) { Remove-Item $setupPath }
+
+# The trailer layout is defined once, in tools/logscope-setup/src/payload.rs,
+# and written by the append-payload utility from that same code. Rebuilding
+# it here in PowerShell would create a second definition that could drift and
+# produce a setup executable the stub refuses to read.
+$appender = Join-Path $repo "target/release/append_payload.exe"
+if (-not (Test-Path $appender)) { throw "missing $appender" }
+
+$embeddedHash = (& $appender $stub $zipPath $setupPath) | Select-Object -Last 1
+if ($LASTEXITCODE -ne 0) { throw "append-payload failed" }
+
+# --- Assert the two artifacts carry byte-identical payloads ---------------
+# append-payload already re-read the payload through the stub's own code
+# path; this compares that verified digest against the standalone archive.
+# This is the gate that has been structurally untestable since v0.0
+# (v0.0-G004): setup and ZIP must extract to byte-equivalent payload trees.
+if ($embeddedHash -ne $zipHash) {
+    throw "setup payload ($embeddedHash) does not match the portable ZIP ($zipHash)"
+}
+
+$setupHash = (Get-FileHash -Algorithm SHA256 $setupPath).Hash.ToLowerInvariant()
+"$setupHash *$setupName" | Set-Content -Encoding ascii "$setupPath.sha256"
+
 Write-Host ""
 Write-Host "Portable archive : $zipPath"
 Write-Host "Archive size     : $([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MiB"
 Write-Host "SHA-256          : $zipHash"
+Write-Host "Setup executable : $setupPath"
+Write-Host "Setup size       : $([math]::Round((Get-Item $setupPath).Length / 1MB, 1)) MiB"
+Write-Host "SHA-256          : $setupHash"
+Write-Host "Payload equal    : yes (setup embeds the portable ZIP byte-for-byte)"
 Write-Host "WebView2         : $webview2State"
