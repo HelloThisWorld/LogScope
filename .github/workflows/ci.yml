@@ -1,11 +1,11 @@
 name: CI
 
 # All routine CI (format, lint, full tests, desktop shell smoke) runs on
-# the personal macOS self-hosted runner (Apple Silicon). GitHub-hosted
-# runners are used ONLY by the two on-demand jobs below: the Linux
-# shared-core check and the Windows packaging job. Both are
-# workflow_dispatch-gated while the Actions billing limit blocks hosted
-# minutes.
+# the personal macOS self-hosted runner (Apple Silicon). The Linux
+# shared-core leg also runs there, inside a linux/arm64 container, so it
+# needs no hosted minutes. The only GitHub-hosted job is the Windows
+# packaging job, which cannot run on the Mac and stays dispatch-gated
+# while the Actions billing limit blocks hosted minutes.
 #
 # SECURITY RED LINE: a self-hosted runner must never serve a public
 # repository. If this repo is ever made public, move every job back to
@@ -81,28 +81,53 @@ jobs:
     # Linux is not a release platform and the desktop-shell build check
     # belongs to the macOS job.
     #
-    # Hosted-runner job, so it is dispatch-gated exactly like the Windows
-    # packaging job below: GitHub-hosted minutes are unavailable while the
-    # Actions billing limit is in force, and a job wired to pull_request
-    # would fail every PR instead of reporting the real blocker. Move this
-    # to `pull_request` as soon as hosted minutes are restored.
-    name: Shared core (Linux x64)
+    # Runs in a Linux container ON the self-hosted macOS runner rather than
+    # on a GitHub-hosted Linux runner, because hosted minutes are
+    # unavailable under the Actions billing limit. Apple Silicon executes
+    # linux/arm64 containers natively, so this is real Linux — not
+    # emulation — and it exercises exactly what this leg is for:
+    # case-sensitive filesystem behaviour, POSIX path canonicalization,
+    # encodings, line endings and timezone handling. It is NOT an x86_64
+    # check; the architecture difference is deliberate and recorded,
+    # because emulating amd64 would make the bundled DuckDB build
+    # impractically slow for no additional signal on these semantics.
+    #
+    # Dispatch-gated so it does not serialize behind mac-ci on every PR —
+    # there is one self-hosted runner. Move to `pull_request` if a second
+    # runner becomes available.
+    name: Shared core (Linux container, arm64)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-core
-          cache-on-failure: true
-      - name: Toolchain versions
+      - name: Verify Docker is available
+        # Fail fast with an actionable message rather than a confusing
+        # "command not found" halfway through the job.
         run: |
-          rustup show active-toolchain
-          rustc --version
-          cargo --version
-      - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
-      - run: cargo test --workspace --exclude logscope-desktop
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "::error::Docker is not installed on the self-hosted macOS runner." >&2
+            echo "Install Docker Desktop (or colima) on the runner host to enable this leg." >&2
+            exit 1
+          fi
+          docker version --format '{{.Server.Version}}' || {
+            echo "::error::Docker is installed but its daemon is not running." >&2
+            exit 1
+          }
+      - name: Shared-core clippy + tests in a Linux container
+        # CARGO_TARGET_DIR is redirected inside the container so Linux
+        # build output never lands in the macOS runner's warm target dir.
+        run: |
+          docker run --rm \
+            -v "$PWD":/work -w /work \
+            -e CARGO_TERM_COLOR=always \
+            -e CARGO_TARGET_DIR=/tmp/target-linux \
+            rust:1-bookworm \
+            bash -c '
+              set -euo pipefail
+              rustc --version && cargo --version
+              cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
+              cargo test --workspace --exclude logscope-desktop
+            '
 
   package-windows:
     # On demand only (workflow_dispatch): PR iteration does not need a
