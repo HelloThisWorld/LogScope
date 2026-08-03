@@ -100,28 +100,51 @@ jobs:
     runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
-      - name: Put user toolchains on PATH
+      - name: Put user toolchains and Docker on PATH
         # The runner service starts with a minimal PATH, exactly as in the
-        # macOS job above. Docker Desktop installs its CLI outside that
-        # PATH, so without this the job reports "Docker is not installed"
-        # on a host where Docker is installed and running.
+        # macOS job above. Docker Desktop only symlinks its CLI into
+        # /usr/local/bin if it was granted privileged access on first
+        # launch; otherwise the binaries stay inside the app bundle and are
+        # reachable only through a shell profile the runner never reads.
+        # The app-bundle path is therefore included explicitly, so the leg
+        # works whether or not those symlinks exist.
         run: |
           echo "/usr/local/bin" >> "$GITHUB_PATH"
           echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
           echo "$HOME/.docker/bin" >> "$GITHUB_PATH"
+          echo "/Applications/Docker.app/Contents/Resources/bin" >> "$GITHUB_PATH"
       - name: Verify Docker is available
         # Fail fast with an actionable message rather than a confusing
         # "command not found" halfway through the job.
+        #
+        # On failure this reports where it actually looked and what it
+        # found, so the next fix is driven by evidence from the runner
+        # instead of another guess at where Docker Desktop put its CLI.
         run: |
           if ! command -v docker >/dev/null 2>&1; then
-            echo "::error::docker was not found on PATH: $PATH" >&2
-            echo "Install Docker Desktop or colima on the runner host, or add its bin dir above." >&2
+            echo "::error::docker was not found on PATH." >&2
+            echo "--- PATH ---" >&2
+            tr ':' '\n' <<<"$PATH" >&2
+            echo "--- candidate locations ---" >&2
+            for p in /usr/local/bin/docker \
+                     /opt/homebrew/bin/docker \
+                     "$HOME/.docker/bin/docker" \
+                     /Applications/Docker.app/Contents/Resources/bin/docker \
+                     "$HOME/Applications/Docker.app/Contents/Resources/bin/docker" \
+                     /opt/podman/bin/docker; do
+              if [ -e "$p" ]; then echo "FOUND   $p" >&2; else echo "absent  $p" >&2; fi
+            done
+            echo "--- any docker/colima/podman binary under /Applications and \$HOME ---" >&2
+            find /Applications "$HOME" -maxdepth 6 -type f \
+                 \( -name docker -o -name colima -o -name podman \) 2>/dev/null | head -20 >&2 || true
+            echo "Fix: add the directory reported above to the PATH step, or run" >&2
+            echo "'colima start'. Launching Docker Desktop once also creates its CLI links." >&2
             exit 1
           fi
           echo "docker CLI: $(command -v docker)"
           docker version --format 'server {{.Server.Version}}' || {
             echo "::error::The docker CLI is present but its daemon is not reachable." >&2
-            echo "Start Docker Desktop (or 'colima start') on the runner host." >&2
+            echo "Start Docker Desktop (or run 'colima start') on the runner host." >&2
             exit 1
           }
       - name: Shared-core clippy + tests in a Linux container

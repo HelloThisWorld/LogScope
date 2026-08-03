@@ -134,12 +134,32 @@ pub enum Progress<'a> {
 /// Absolute paths, drive letters, UNC prefixes, `..` traversal and
 /// backslash separators are all refused rather than sanitised, because a
 /// payload we build ourselves has no legitimate reason to contain them.
+///
+/// The rules are deliberately **platform-independent**. `Path::components`
+/// is not: on Windows `C:` parses as a `Prefix` and is refused, while on
+/// Unix it is an ordinary `Normal` component and would be accepted. A
+/// payload is extracted on whichever platform the user runs, and the
+/// shared core must classify a hostile path identically everywhere, so the
+/// colon and separator rules below are applied by inspection rather than
+/// delegated to the host's path parser.
 fn safe_relative(raw: &str) -> Result<PathBuf, ExtractError> {
     if raw.is_empty() || raw.contains('\0') {
         return Err(ExtractError::UnsafePath(raw.to_string()));
     }
     // Normalise separators before inspection so `a\..\..\b` cannot slip past.
     let normalised = raw.replace('\\', "/");
+
+    // A colon anywhere means a drive reference (`C:/x`), a device path
+    // (`\\?\C:`) or an NTFS alternate data stream (`f.txt:hidden`). None is
+    // legitimate in a payload, and only Windows' parser would catch them.
+    if normalised.contains(':') {
+        return Err(ExtractError::UnsafePath(raw.to_string()));
+    }
+    // Leading separator is absolute on every platform once normalised.
+    if normalised.starts_with('/') {
+        return Err(ExtractError::UnsafePath(raw.to_string()));
+    }
+
     let candidate = Path::new(&normalised);
     let mut out = PathBuf::new();
     for c in candidate.components() {
@@ -419,6 +439,10 @@ fn publish(staging: &Path, dest: &Path) -> Result<(), ExtractError> {
 mod tests {
     use super::*;
 
+    /// These must hold identically on every platform. `C:/abs.txt` was
+    /// accepted on Unix and refused on Windows until the colon rule stopped
+    /// delegating the decision to the host's path parser — caught by the
+    /// macOS shared-core leg, not by local Windows runs.
     #[test]
     fn traversal_and_absolute_paths_are_refused() {
         for bad in [
@@ -426,8 +450,12 @@ mod tests {
             "a/../../escape.txt",
             "/abs.txt",
             "C:/abs.txt",
+            "c:abs.txt",
             "\\\\server\\share\\f.txt",
+            "\\\\?\\C:\\abs.txt",
             "a\\..\\..\\escape.txt",
+            "ok/../../escape.txt",
+            "payload.txt:hidden",
             "",
             "nul",
             "COM1.txt",
