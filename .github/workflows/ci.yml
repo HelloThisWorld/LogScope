@@ -116,11 +116,29 @@ jobs:
       - name: Verify Docker is available
         # Fail fast with an actionable message rather than a confusing
         # "command not found" halfway through the job.
+        #
+        # On failure this reports where it actually looked and what it
+        # found, so the next fix is driven by evidence from the runner
+        # instead of another guess at where Docker Desktop put its CLI.
         run: |
           if ! command -v docker >/dev/null 2>&1; then
-            echo "::error::docker was not found. Searched PATH: $PATH" >&2
-            echo "If Docker Desktop is installed, launch it once so it creates its CLI links," >&2
-            echo "or add its bin directory to the PATH step above. 'colima' also works." >&2
+            echo "::error::docker was not found on PATH." >&2
+            echo "--- PATH ---" >&2
+            tr ':' '\n' <<<"$PATH" >&2
+            echo "--- candidate locations ---" >&2
+            for p in /usr/local/bin/docker \
+                     /opt/homebrew/bin/docker \
+                     "$HOME/.docker/bin/docker" \
+                     /Applications/Docker.app/Contents/Resources/bin/docker \
+                     "$HOME/Applications/Docker.app/Contents/Resources/bin/docker" \
+                     /opt/podman/bin/docker; do
+              if [ -e "$p" ]; then echo "FOUND   $p" >&2; else echo "absent  $p" >&2; fi
+            done
+            echo "--- any docker/colima/podman binary under /Applications and \$HOME ---" >&2
+            find /Applications "$HOME" -maxdepth 6 -type f \
+                 \( -name docker -o -name colima -o -name podman \) 2>/dev/null | head -20 >&2 || true
+            echo "Fix: add the directory reported above to the PATH step, or run" >&2
+            echo "'colima start'. Launching Docker Desktop once also creates its CLI links." >&2
             exit 1
           fi
           echo "docker CLI: $(command -v docker)"
