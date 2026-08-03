@@ -100,15 +100,16 @@ jobs:
     runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
-      - name: Put user toolchains and Docker on PATH
+      - name: Put user toolchains and the container CLI on PATH
         # The runner service starts with a minimal PATH, exactly as in the
-        # macOS job above. Docker Desktop only symlinks its CLI into
-        # /usr/local/bin if it was granted privileged access on first
-        # launch; otherwise the binaries stay inside the app bundle and are
-        # reachable only through a shell profile the runner never reads.
-        # The app-bundle path is therefore included explicitly, so the leg
-        # works whether or not those symlinks exist.
+        # macOS job above, so the container CLI has to be named explicitly.
+        #
+        # This runner uses **Rancher Desktop**, which installs its docker
+        # CLI shim into ~/.rd/bin — not /usr/local/bin, and not a Docker
+        # Desktop app bundle. The other entries are kept so the leg also
+        # works on a host running Docker Desktop, Homebrew docker or colima.
         run: |
+          echo "$HOME/.rd/bin" >> "$GITHUB_PATH"
           echo "/usr/local/bin" >> "$GITHUB_PATH"
           echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
           echo "$HOME/.docker/bin" >> "$GITHUB_PATH"
@@ -126,7 +127,8 @@ jobs:
             echo "--- PATH ---" >&2
             tr ':' '\n' <<<"$PATH" >&2
             echo "--- candidate locations ---" >&2
-            for p in /usr/local/bin/docker \
+            for p in "$HOME/.rd/bin/docker" \
+                     /usr/local/bin/docker \
                      /opt/homebrew/bin/docker \
                      "$HOME/.docker/bin/docker" \
                      /Applications/Docker.app/Contents/Resources/bin/docker \
@@ -143,8 +145,8 @@ jobs:
           fi
           echo "docker CLI: $(command -v docker)"
           docker version --format 'server {{.Server.Version}}' || {
-            echo "::error::The docker CLI is present but its daemon is not reachable." >&2
-            echo "Start Docker Desktop (or run 'colima start') on the runner host." >&2
+            echo "::error::The docker CLI is present but its container runtime is not reachable." >&2
+            echo "Start Rancher Desktop on the runner host (or Docker Desktop / 'colima start')." >&2
             exit 1
           }
       - name: Shared-core clippy + tests in a Linux container
