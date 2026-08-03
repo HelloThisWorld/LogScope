@@ -2,7 +2,10 @@ name: CI
 
 # All routine CI (format, lint, full tests, desktop shell smoke) runs on
 # the personal macOS self-hosted runner (Apple Silicon). GitHub-hosted
-# runners are used ONLY by the on-demand Windows packaging job below.
+# runners are used ONLY by the two on-demand jobs below: the Linux
+# shared-core check and the Windows packaging job. Both are
+# workflow_dispatch-gated while the Actions billing limit blocks hosted
+# minutes.
 #
 # SECURITY RED LINE: a self-hosted runner must never serve a public
 # repository. If this repo is ever made public, move every job back to
@@ -70,6 +73,36 @@ jobs:
           npm run build
       - name: Tauri desktop shell build smoke
         run: cargo build -p logscope-desktop
+
+  linux-core:
+    # Shared-core semantics only: path canonicalization, encodings,
+    # timezones, line endings and file identity on a case-sensitive
+    # filesystem. The Tauri desktop shell is excluded deliberately —
+    # Linux is not a release platform and the desktop-shell build check
+    # belongs to the macOS job.
+    #
+    # Hosted-runner job, so it is dispatch-gated exactly like the Windows
+    # packaging job below: GitHub-hosted minutes are unavailable while the
+    # Actions billing limit is in force, and a job wired to pull_request
+    # would fail every PR instead of reporting the real blocker. Move this
+    # to `pull_request` as soon as hosted minutes are restored.
+    name: Shared core (Linux x64)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-core
+          cache-on-failure: true
+      - name: Toolchain versions
+        run: |
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
+      - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
+      - run: cargo test --workspace --exclude logscope-desktop
 
   package-windows:
     # On demand only (workflow_dispatch): PR iteration does not need a

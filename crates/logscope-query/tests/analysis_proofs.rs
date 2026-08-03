@@ -423,6 +423,36 @@ fn external_cancellation_maps_to_cancelled() {
     assert!(matches!(result, Err(QueryError::Cancelled)), "{result:?}");
 }
 
+/// Regression (F-1): DuckDB clears a pending interrupt when a query starts,
+/// so a cancellation raised before execution used to be dropped and the
+/// query ran to completion — returning `Ok` instead of `Cancelled` and
+/// ignoring the caller for the whole budget (600 s for field stats, 24 h for
+/// export). Cancelling first must short-circuit without running the query.
+#[test]
+fn cancellation_before_query_start_is_not_lost() {
+    let engine = EngineConnection::open_in_memory().unwrap();
+    let cancel = QueryCancelHandle::new(engine.interrupt_handle());
+    cancel.cancel();
+
+    let started = std::time::Instant::now();
+    let result: Result<i64, QueryError> = run_bounded(&cancel, Duration::from_secs(120), || {
+        Ok(engine.raw().query_row(
+            "SELECT count(*) FROM range(300000) a, range(300000) b",
+            [],
+            |r| r.get(0),
+        )?)
+    });
+    let elapsed = started.elapsed();
+
+    assert!(matches!(result, Err(QueryError::Cancelled)), "{result:?}");
+    // The uninterrupted cross join takes ~19 s; anything near that means the
+    // query was launched despite the pending cancellation.
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "cancelled query must not run: {elapsed:?}"
+    );
+}
+
 #[test]
 fn empty_segment_list_yields_empty_page() {
     let engine = EngineConnection::open_in_memory().unwrap();
