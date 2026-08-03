@@ -35,19 +35,41 @@ $outDir = Join-Path $repo "dist-portable"
 $stageDir = Join-Path $outDir $archiveName
 
 if (-not $SkipBuild) {
-    Write-Host "Building frontend..."
+    # Must go through the Tauri CLI, NOT `cargo build`. A plain cargo build
+    # produces an executable that loads the frontend from `devUrl`
+    # (http://localhost:5173) instead of embedding `frontendDist`, so the
+    # packaged app starts and then shows the WebView2 "can't reach this page"
+    # error. The CLI also runs `beforeBuildCommand`, which builds the frontend.
+    Write-Host "Building frontend + release executable via the Tauri CLI..."
     Push-Location (Join-Path $repo "apps/desktop")
-    npm run build
-    if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+    npm run tauri build -- --no-bundle
+    if ($LASTEXITCODE -ne 0) { Pop-Location; throw "tauri build failed" }
     Pop-Location
-
-    Write-Host "Building release executable..."
-    cargo build --release -p logscope-desktop
-    if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 }
 
 $exe = Join-Path $repo "target/release/logscope.exe"
 if (-not (Test-Path $exe)) { throw "missing $exe" }
+
+# --- Guard: the executable must actually carry the frontend ---------------
+# Packaging a dev-mode binary is invisible until first launch, and every
+# artifact from 0.0.0 through 0.2.1 shipped broken this way. Assert that each
+# asset referenced by the built index.html is present inside the executable.
+$distIndex = Join-Path $repo "apps/desktop/dist/index.html"
+if (-not (Test-Path $distIndex)) { throw "missing $distIndex - frontend was never built" }
+$assetRefs = [regex]::Matches((Get-Content -Raw $distIndex), 'assets/[A-Za-z0-9._-]+') |
+    ForEach-Object { $_.Value } | Sort-Object -Unique
+if ($assetRefs.Count -eq 0) { throw "no asset references found in $distIndex" }
+
+$exeText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($exe))
+foreach ($ref in $assetRefs) {
+    if ($exeText.IndexOf($ref, [StringComparison]::Ordinal) -lt 0) {
+        throw ("$exe does not embed '$ref'. It was built without the Tauri CLI " +
+               "and would start with a 'localhost refused to connect' error page. " +
+               "Rebuild with: npm run tauri build -- --no-bundle")
+    }
+}
+Remove-Variable exeText
+Write-Host "Frontend embedding verified ($($assetRefs.Count) assets)."
 
 if (Test-Path $stageDir) { Remove-Item -Recurse -Force $stageDir }
 New-Item -ItemType Directory -Force $stageDir | Out-Null

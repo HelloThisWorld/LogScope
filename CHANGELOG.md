@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.2 — 2026-08-03
+
+**The first portable build whose user interface actually loads.** Every
+archive before this one — 0.0.0, 0.2.0 and 0.2.1 — shipped an executable that
+started and then displayed the WebView2 "Hmmm… can't reach this page /
+localhost refused to connect" error page instead of LogScope.
+
+### Fixed
+- **Packaged executables were built in development mode.**
+  `scripts/package-portable.ps1` built the shell with
+  `cargo build --release -p logscope-desktop`. A plain cargo build does not
+  embed `frontendDist`; the resulting binary loads the UI from `devUrl`
+  (`http://localhost:5173`), which nothing is serving on an end-user machine.
+  Packaging now builds through the Tauri CLI
+  (`npm run tauri build -- --no-bundle`), which embeds the frontend.
+- **Packaging now fails closed.** The script parses the asset references out
+  of the built `index.html` and asserts every one is present inside the
+  executable, so a development-mode binary can no longer be packaged. Verified
+  to reject the previously shipped 0.2.0 executable and accept the corrected
+  one. This defect was invisible until first launch, which is why it survived
+  from 0.0.0: the packaging step succeeded and the application did start.
+
+### Note on 0.2.1
+Tag `v0.2.1` exists but has no published release. Its archive carried the same
+unusable executable and was withdrawn before use rather than being replaced in
+place. The 0.2.1 source changes below are all included here.
+
 ## 0.2.1 — 2026-08-03
 
 Patch release. One user-visible correctness fix in the bounded query path.

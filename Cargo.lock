@@ -2614,7 +2614,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "logscope-app"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "blake3",
  "chrono",
@@ -2642,7 +2642,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-case"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -2652,7 +2652,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-desktop"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "crossbeam-channel",
  "logscope-app",
@@ -2676,7 +2676,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-ingest"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "blake3",
  "chrono",
@@ -2695,7 +2695,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-jobs"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "crossbeam-channel",
@@ -2709,7 +2709,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-model"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -2721,7 +2721,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-normalize"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -2733,7 +2733,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-otlp"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axum",
  "blake3",
@@ -2759,7 +2759,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-query"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -2778,7 +2778,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-query-lang"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "logscope-model",
@@ -2791,7 +2791,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-store"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "arrow 59.1.0",
  "blake3",
@@ -2807,7 +2807,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-testsupport"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "crossbeam-channel",
@@ -2831,7 +2831,7 @@ dependencies = [
 
 [[package]]
 name = "logscope-workspace"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "logscope-case",
