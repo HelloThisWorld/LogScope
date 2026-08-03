@@ -16,7 +16,7 @@ Publisher or SmartScreen warning when the executable first runs. Download only
 from the official release above and verify the `.sha256` sidecar published
 alongside the archive.
 
-**Status: 0.2.1 — early development.** LogScope is not feature complete and is
+**Status: 0.2.2 — early development.** LogScope is not feature complete and is
 not a 1.0 product. Only the Log Explorer half of one profile works today; see
 [Product profiles](#product-profiles) for exactly what is and is not available.
 
@@ -33,7 +33,7 @@ The only distribution is an unsigned, relocatable Portable ZIP. For a version
 - `LogScope-<version>-windows-x64-portable.zip` — extract and run without
   installation.
 
-The current source version is `0.2.1`. See the
+The current source version is `0.2.2`. See the
 [latest official Release](https://github.com/HelloThisWorld/LogScope/releases/latest)
 for the published asset list and checksum.
 
@@ -66,7 +66,7 @@ Adding a signal later will not require recreating a workspace.
 
 ## Core features
 
-Available today at 0.2.1:
+Available today at 0.2.2:
 
 - import of generic JSONL, CSV, and Elasticsearch/ECS JSONL log exports through
   a versioned, declarative import-profile boundary;
@@ -124,7 +124,7 @@ cargo test --workspace --exclude logscope-desktop
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cd apps/desktop; npm install; npm run tauri dev
-pwsh scripts/package-portable.ps1 -Version 0.2.1
+pwsh scripts/package-portable.ps1 -Version 0.2.2
 ```
 
 Benchmarks use deterministic ChaCha8 corpora that are generated on demand and
