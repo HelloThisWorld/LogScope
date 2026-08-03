@@ -3,6 +3,7 @@ name = "logscope-store"
 description = "Analytical storage: canonical batches to partitioned Parquet segments plus FTS indexing"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

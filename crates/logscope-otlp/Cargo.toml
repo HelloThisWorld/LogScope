@@ -3,6 +3,7 @@ name = "logscope-otlp"
 description = "EXPERIMENTAL OTLP compatibility spike: HTTP protobuf/JSON, gRPC, JSONL file import"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

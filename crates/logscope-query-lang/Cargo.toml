@@ -2,6 +2,7 @@
 name = "logscope-query-lang"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 description = "LogScope query language v1: lexer, parser, typed AST, validation, fingerprints"
 

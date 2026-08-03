@@ -165,20 +165,32 @@ decision, not merely absent.
 
 ## Code signing policy
 
-**Current status:** LogScope releases are **not** signed. No code-signing
-certificate has been issued for this project and no signing infrastructure is
-configured. A release archive is verified only by the SHA-256 checksum published
-next to it and by the per-file hashes inside its `package-manifest.json`.
+**LogScope releases are unsigned by design.** This is a settled project
+decision, not a pending task: LogScope is distributed as a relocatable payload
+that requires no installer, no elevation and no registered system state, so
+Authenticode signing is not a release prerequisite. Windows may display an
+Unknown Publisher or SmartScreen warning; that is expected.
 
-Signing, if it is ever added, will be an isolated post-build stage producing
-separately identified artifacts; an unsigned build will never be relabelled as
-signed.
+Release integrity is established by:
 
-## License and status
+- the SHA-256 checksum published beside each artifact;
+- the per-file SHA-256 hashes recorded inside the artifact's
+  `package-manifest.json`;
+- deterministic, reproducible unsigned builds from declared inputs.
 
-License selection is pending and intentionally not decided by tooling. See
-[docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md) for bundled component
-licenses.
+If signing is ever added it will be an isolated post-build stage producing
+separately identified artifacts with their own checksums. An unsigned build will
+never be relabelled as signed, and no placeholder certificate or "Signed" label
+is ever used. See [ADR-0018](docs/adr/0018-release-signing-and-distribution-policy.md).
+
+## License
+
+LogScope is released under the **[MIT License](LICENSE)**.
+
+See [docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md) for bundled
+component licenses.
+
+## Status
 
 Architecture decisions live in [docs/adr/](docs/adr/) (0001–0017). Milestone
 plans, acceptance matrices and the current blocker chain live in

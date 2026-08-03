@@ -13,7 +13,15 @@ must stay open.
 ## Decision
 
 1. `tauri.conf.json` sets `bundle.active = false`; Tauri's bundler is never
-   used. `cargo build --release -p logscope-desktop` produces the exe.
+   used. The exe is produced by `npm run tauri build -- --no-bundle`.
+
+   **Corrected 2026-08-03 (ADR-0018):** this step previously said
+   `cargo build --release -p logscope-desktop`. A plain cargo build does
+   not embed `frontendDist`, so the packaged exe loaded the UI from
+   `devUrl` and every artifact from 0.0.0 through 0.2.1 shipped a
+   development-mode binary that showed a WebView2 error page instead of
+   LogScope. Packaging now goes through the Tauri CLI and asserts the
+   frontend is embedded before archiving.
 2. `scripts/package-portable.ps1` assembles
    `LogScope-<version>-windows-x64-portable.zip` from an explicit file list,
    producing a machine-readable `package-manifest.json` (per-file SHA-256)

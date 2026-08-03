@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **MIT license.** LogScope is released under the MIT License (`LICENSE`).
+  `license = "MIT"` is declared in the workspace package metadata, inherited
+  by all 13 crates, and set in `apps/desktop/package.json`. This closes the
+  long-standing "license selection is pending" gap, which blocked any GA
+  claim regardless of code readiness.
+- **ADR-0018 — release signing policy and Eclipse-style graphical extractor.**
+  Settles two questions open since v0.0:
+  - **Signing is not a GA prerequisite.** LogScope releases are unsigned by
+    settled policy, not by omission. Integrity comes from published SHA-256
+    checksums, per-file hashes in `package-manifest.json`, and deterministic
+    reproducible builds. An unsigned build is never relabelled as signed.
+  - **The graphical setup is a shell around the same ZIP payload** — a
+    launcher stub with the compressed payload appended, in the spirit of a
+    self-contained Java archive. Explicitly not an MSI, MSIX, NSIS,
+    bootstrapper or registered uninstaller. Both public artifacts wrap one
+    canonical payload, so byte-equivalence is a design property rather than
+    a coincidence.
+
+### Fixed
+- **ADR-0002 recorded the wrong build command.** It specified
+  `cargo build --release -p logscope-desktop`, which does not embed
+  `frontendDist` — the root cause of the development-mode binaries shipped
+  in every artifact from 0.0.0 through 0.2.1. Corrected to the Tauri CLI
+  build, with a cross-reference to ADR-0018.
+
 ## 0.2.2 — 2026-08-03
 
 **The first portable build whose user interface actually loads.** Every

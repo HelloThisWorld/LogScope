@@ -3,6 +3,7 @@ name = "logscope-desktop"
 description = "LogScope desktop shell (Tauri)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [[bin]]

@@ -2,6 +2,7 @@
 name = "logscope-case"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 description = "Platform-neutral investigation-workbench domain: typed vocabulary, id minting, evidence envelope, and (later) report/redaction/bundle contracts"
 

@@ -3,6 +3,7 @@ name = "logscope-app"
 description = "Application services behind the typed command boundary (shared by desktop and future CLI)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

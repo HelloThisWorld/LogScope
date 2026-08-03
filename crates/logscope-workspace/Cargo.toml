@@ -3,6 +3,7 @@ name = "logscope-workspace"
 description = "Workspace layout, manifest, SQLite metadata, migrations, staging and recovery"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

@@ -3,6 +3,7 @@ name = "logscope-ingest"
 description = "Source adapters and Import Profiles: streaming CSV/JSONL/text readers with provenance"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

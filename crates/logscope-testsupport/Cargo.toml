@@ -3,6 +3,7 @@ name = "logscope-testsupport"
 description = "Test support: golden fixture access, deterministic corpus generators, benchmark helpers"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
