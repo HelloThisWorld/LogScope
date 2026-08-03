@@ -147,9 +147,10 @@ cargo run --release -p logscope-testsupport --bin bench_query -- 1000000
 ```
 
 Routine CI (format, lint, full tests, desktop shell smoke) runs on a
-self-hosted macOS runner. The Linux shared-core leg and the Windows packaging
-job are `workflow_dispatch`-gated and currently blocked on GitHub Actions
-hosted minutes.
+self-hosted macOS runner. The Linux shared-core leg runs there too, inside a
+`linux/arm64` container, and the Windows packaging job runs on a hosted
+Windows runner. Both are `workflow_dispatch`-gated so they do not serialize
+behind every pull request on a single runner.
 
 ## Privacy and security
 
