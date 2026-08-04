@@ -20,6 +20,10 @@ pub struct RecoveryReport {
     pub interrupted_jobs: Vec<String>,
     /// Staging-status datasets with no published segments, deleted.
     pub discarded_staging_datasets: Vec<String>,
+    /// Report-artifact / bundle-export records found `running` and
+    /// finished as failed (`kind:id`) — honest tombstones, never deleted.
+    #[serde(default)]
+    pub interrupted_case_records: Vec<String>,
 }
 
 impl RecoveryReport {
@@ -28,6 +32,7 @@ impl RecoveryReport {
             && self.removed_orphan_files.is_empty()
             && self.interrupted_jobs.is_empty()
             && self.discarded_staging_datasets.is_empty()
+            && self.interrupted_case_records.is_empty()
     }
 }
 
@@ -113,9 +118,15 @@ impl Workspace {
     ///    re-runnable; user source files are never touched);
     /// 3. dataset-directory files not referenced by any committed segment
     ///    row are removed (crash between file move and commit);
-    /// 4. `staging`-status datasets without segments are deleted.
+    /// 4. `staging`-status datasets without segments are deleted;
+    /// 5. `running` report-artifact / bundle-export records are finished
+    ///    as failed (`job/interrupted`) — the tombstone is completed,
+    ///    never deleted, so an interrupted generation stays on record.
     fn recover_interrupted_state(&self) -> Result<RecoveryReport, WorkspaceError> {
-        let mut report = RecoveryReport::default();
+        let mut report = RecoveryReport {
+            interrupted_case_records: self.meta.fail_interrupted_case_records()?,
+            ..RecoveryReport::default()
+        };
 
         for job in self.meta.list_jobs()? {
             if matches!(job.status.as_str(), "running" | "pending" | "paused") {

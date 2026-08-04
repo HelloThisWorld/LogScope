@@ -31,6 +31,8 @@ pub struct RecoveryDto {
     pub removed_orphan_files: Vec<String>,
     pub interrupted_jobs: Vec<String>,
     pub discarded_staging_datasets: Vec<String>,
+    /// `running` report/bundle records finished as failed on reopen.
+    pub interrupted_case_records: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
