@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Application manifest for the LogScope setup stub.
+
+  This exists for exactly one reason: rfd is built with its
+  `common-controls-v6` feature, so the executable imports
+  `TaskDialogIndirect`, which only comctl32 v6 exports - and Windows only
+  binds comctl32 v6 when the executable's manifest declares the dependency
+  below. Without it the loader binds comctl32 v5, the import cannot be
+  resolved, and the process dies with STATUS_ENTRYPOINT_NOT_FOUND
+  (0xC0000139) before main() runs.
+
+  Kept deliberately minimal: nothing is declared that is not required.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity
+      type="win32"
+      name="LogScope.Setup"
+      version="1.0.0.0"
+      processorArchitecture="amd64"/>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+          type="win32"
+          name="Microsoft.Windows.Common-Controls"
+          version="6.0.0.0"
+          processorArchitecture="*"
+          publicKeyToken="6595b64144ccf1df"
+          language="*"/>
+    </dependentAssembly>
+  </dependency>
+</assembly>

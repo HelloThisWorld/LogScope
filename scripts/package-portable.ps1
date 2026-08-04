@@ -159,11 +159,14 @@ $zipHash = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
 # appended, followed by a fixed trailer. Byte-equivalence between the two
 # public artifacts is therefore a property of construction, not a
 # coincidence - and it is asserted below rather than assumed.
-if (-not $SkipBuild) {
-    Write-Host "Building the graphical extractor stub..."
-    cargo build --release -p logscope-setup
-    if ($LASTEXITCODE -ne 0) { throw "logscope-setup build failed" }
-}
+# The stub is always rebuilt, even under -SkipBuild. -SkipBuild exists to
+# skip the expensive Tauri build; the stub takes seconds, and reusing a
+# stale stub here once packaged a setup executable that did not match the
+# source tree - silently, because everything downstream (append, hashes,
+# payload equality) is computed from whatever stub bytes are lying around.
+Write-Host "Building the graphical extractor stub..."
+cargo build --release -p logscope-setup
+if ($LASTEXITCODE -ne 0) { throw "logscope-setup build failed" }
 $stub = Join-Path $repo "target/release/logscope-setup.exe"
 if (-not (Test-Path $stub)) { throw "missing $stub" }
 

@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 — 2026-08-04
+
+**The first release whose user interface actually loads, and the first to
+ship both public artifacts.** Every archive before this one — 0.0.0, 0.2.0
+and 0.2.1 — shipped an executable that started and then displayed the
+WebView2 "Hmmm… can't reach this page / localhost refused to connect" error
+page instead of LogScope.
 
 ### Added
 - **MIT license.** LogScope is released under the MIT License (`LICENSE`).
@@ -20,22 +26,44 @@
     bootstrapper or registered uninstaller. Both public artifacts wrap one
     canonical payload, so byte-equivalence is a design property rather than
     a coincidence.
+- **The graphical setup extractor exists** (`tools/logscope-setup`),
+  closing `v0.0-G004` — the oldest open gate in the repository — under the
+  ADR-0018 design. A small Win32 launcher (destination picker, progress
+  window, cancel) reads the ZIP payload appended to its own executable via
+  a fixed 70-byte trailer, verifies the payload's SHA-256 **before**
+  extraction begins, extracts to a staging directory next to the
+  destination, verifies every file against `package-manifest.json`, and
+  only then moves it into place; failure or cancel rolls back and leaves
+  nothing behind. It installs no registry state, service, shortcut or
+  uninstaller and needs no administrator rights.
+- **Packaging emits both public artifacts and fails closed on divergence.**
+  `scripts/package-portable.ps1` now also produces
+  `LogScope-<version>-windows-x64-setup.exe` by appending the portable ZIP
+  to the launcher stub — through the same Rust code that later reads it,
+  so the trailer has exactly one definition — and aborts unless the
+  embedded payload's SHA-256 equals the portable ZIP's.
 
 ### Fixed
-- **ADR-0002 recorded the wrong build command.** It specified
-  `cargo build --release -p logscope-desktop`, which does not embed
-  `frontendDist` — the root cause of the development-mode binaries shipped
-  in every artifact from 0.0.0 through 0.2.1. Corrected to the Tauri CLI
-  build, with a cross-reference to ADR-0018.
-
-## 0.2.2 — 2026-08-03
-
-**The first portable build whose user interface actually loads.** Every
-archive before this one — 0.0.0, 0.2.0 and 0.2.1 — shipped an executable that
-started and then displayed the WebView2 "Hmmm… can't reach this page /
-localhost refused to connect" error page instead of LogScope.
-
-### Fixed
+- **The setup executable crashed at launch** with
+  `STATUS_ENTRYPOINT_NOT_FOUND` (`0xC0000139`), before `main` ran. rfd is
+  built with its `common-controls-v6` feature, so the stub imports
+  `TaskDialogIndirect` — which only comctl32 **v6** exports, and Windows
+  only binds v6 when the executable's manifest declares the dependency. No
+  manifest was embedded, the loader bound v5, and the import could not be
+  resolved. A minimal application manifest is now embedded at link time
+  (`tools/logscope-setup/manifest.xml` via `build.rs`, MSVC-only),
+  `InitCommonControlsEx(ICC_PROGRESS_CLASS)` is called before the progress
+  window is created as comctl32 v6 requires, and the stub is built with
+  `windows_subsystem = "windows"` so it no longer drags a console window
+  behind its dialogs. Caught by a launch smoke test **before** this
+  version was published; every unit test passed throughout, because unit
+  tests exercise the library, not executable loading.
+- **`-SkipBuild` could package a stale extractor stub.** The flag skipped
+  the stub build along with the expensive Tauri build and then silently
+  packaged whatever `target/release/logscope-setup.exe` was lying around —
+  the same fail-open species as the development-mode packaging defect
+  below. The stub (a seconds-long build) is now always rebuilt;
+  `-SkipBuild` only skips the Tauri build.
 - **Packaged executables were built in development mode.**
   `scripts/package-portable.ps1` built the shell with
   `cargo build --release -p logscope-desktop`. A plain cargo build does not

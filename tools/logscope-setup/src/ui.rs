@@ -21,7 +21,9 @@ mod imp {
     use windows::core::{w, PCWSTR};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows::Win32::UI::Controls::{PBM_SETPOS, PBM_SETRANGE32};
+    use windows::Win32::UI::Controls::{
+        InitCommonControlsEx, ICC_PROGRESS_CLASS, INITCOMMONCONTROLSEX, PBM_SETPOS, PBM_SETRANGE32,
+    };
     use windows::Win32::UI::WindowsAndMessaging::*;
 
     fn wide(s: &str) -> Vec<u16> {
@@ -103,6 +105,15 @@ mod imp {
     impl ProgressWindow {
         pub fn open(title: &str, cancel: Arc<AtomicBool>) -> Self {
             unsafe {
+                // The manifest binds comctl32 v6; v6 additionally requires
+                // the class to be registered explicitly before
+                // `msctls_progress32` can be created.
+                let icc = INITCOMMONCONTROLSEX {
+                    dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+                    dwICC: ICC_PROGRESS_CLASS,
+                };
+                let _ = InitCommonControlsEx(&icc);
+
                 let instance = GetModuleHandleW(None).unwrap_or_default();
                 let class = w!("LogScopeSetupProgress");
                 let wc = WNDCLASSW {

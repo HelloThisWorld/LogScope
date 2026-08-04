@@ -9,6 +9,11 @@
 //!
 //! No network access is performed at any point.
 
+// GUI subsystem: without this, every launch drags a console window behind
+// the dialogs. Windows-only so the shared-core CI legs still build the
+// crate as an ordinary console binary.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod ui;
 
 use logscope_setup::{extract, payload};
