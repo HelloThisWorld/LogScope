@@ -23,11 +23,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{AppState, CmdResult};
 
-fn err(code: &str, msg: impl std::fmt::Display) -> ErrorDto {
+pub(crate) fn err(code: &str, msg: impl std::fmt::Display) -> ErrorDto {
     ErrorDto::new(code, msg)
 }
 
-fn ws_handle(state: &AppState) -> CmdResult<std::sync::Arc<Workspace>> {
+pub(crate) fn ws_handle(state: &AppState) -> CmdResult<std::sync::Arc<Workspace>> {
     state
         .workspace
         .lock()
@@ -59,7 +59,7 @@ fn diag_dto(d: &logscope_query_lang::Diagnostic) -> DiagnosticDto {
     }
 }
 
-fn strategy_from_dto(dto: &TimeStrategyDto) -> CmdResult<TimeStrategy> {
+pub(crate) fn strategy_from_dto(dto: &TimeStrategyDto) -> CmdResult<TimeStrategy> {
     match dto.kind.as_str() {
         "all" => Ok(TimeStrategy::All),
         "absolute" => match (dto.start, dto.end) {
@@ -93,7 +93,7 @@ fn strategy_to_json(dto: &TimeStrategyDto) -> String {
     .to_string()
 }
 
-fn strategy_from_json(json: &str) -> TimeStrategyDto {
+pub(crate) fn strategy_from_json(json: &str) -> TimeStrategyDto {
     let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
     TimeStrategyDto {
         kind: v["kind"].as_str().unwrap_or("all").to_string(),
@@ -230,7 +230,7 @@ fn prepare(
 }
 
 /// Runs `f` on a pooled engine with a registered cancel handle.
-fn with_engine<T>(
+pub(crate) fn with_engine<T>(
     state: &AppState,
     request_id: Option<&str>,
     f: impl FnOnce(&logscope_query::EngineConnection, &QueryCancelHandle) -> CmdResult<T>,
