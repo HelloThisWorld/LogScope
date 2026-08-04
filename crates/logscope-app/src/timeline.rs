@@ -90,6 +90,108 @@ fn from_context(ctx: &QueryContext) -> (Option<i64>, Option<i64>, &'static str, 
     }
 }
 
+/// Timeline entry for one marker row. Shared by the timeline view and
+/// the report's timeline section so the two can never derive different
+/// answers from the same marker.
+pub fn marker_entry(m: &logscope_workspace::MarkerRow) -> TimelineEntry {
+    TimelineEntry {
+        entry_kind: "marker".into(),
+        id: m.marker_id.clone(),
+        detail_kind: m.kind.clone(),
+        title: m.label.clone(),
+        at_nanos: m.at_nanos,
+        end_nanos: m.end_nanos,
+        time_source: if m.at_nanos.is_some() {
+            "marker"
+        } else {
+            "none"
+        }
+        .into(),
+        undated_reason: if m.at_nanos.is_some() {
+            None
+        } else {
+            Some("marker was entered without a timestamp".into())
+        },
+        description: m.description.clone(),
+        original_time_text: m.original_time_text.clone(),
+        original_tz_offset_min: m.original_tz_offset_min,
+    }
+}
+
+/// Timeline entry for one evidence row (time derived from the decoded
+/// reference; undated with a stated reason otherwise). Shared with the
+/// report renderer — single derivation, no drift.
+pub fn evidence_entry(ev: &logscope_workspace::EvidenceRow) -> TimelineEntry {
+    let (at, end, source, reason): (Option<i64>, Option<i64>, &str, Option<String>) =
+        match envelope::decode_reference(ev.envelope_version, &ev.reference_json) {
+            DecodeOutcome::Decoded(reference) => match reference {
+                EvidenceReference::Event(e) => match e.event_time {
+                    Some(t) => (Some(t), None, "event_time", None),
+                    None => (
+                        None,
+                        None,
+                        "none",
+                        Some("the pinned event has no timestamp".into()),
+                    ),
+                },
+                EvidenceReference::HistogramInterval(i) => {
+                    (Some(i.start), Some(i.end), "interval_bounds", None)
+                }
+                EvidenceReference::Selection(s) => from_context(&s.context),
+                EvidenceReference::Query(q) => from_context(&q.context),
+                EvidenceReference::ExplorerGroup(g) => from_context(&g.context),
+                EvidenceReference::ItemRef(_) => (
+                    None,
+                    None,
+                    "none",
+                    Some("manual item — carries no event time".into()),
+                ),
+            },
+            DecodeOutcome::UnsupportedVersion { stored, supported } => (
+                None,
+                None,
+                "none",
+                Some(format!(
+                    "reference unreadable: envelope {stored} (supported {supported})"
+                )),
+            ),
+            DecodeOutcome::Undecodable { .. } => {
+                (None, None, "none", Some("reference unreadable".into()))
+            }
+        };
+    TimelineEntry {
+        entry_kind: "evidence".into(),
+        id: ev.evidence_id.clone(),
+        detail_kind: ev.kind.clone(),
+        title: ev.title.clone(),
+        at_nanos: at,
+        end_nanos: end,
+        time_source: source.into(),
+        undated_reason: reason,
+        description: ev.annotation.clone(),
+        original_time_text: None,
+        original_tz_offset_min: None,
+    }
+}
+
+/// Sorts entries into the documented deterministic order and splits off
+/// the undated section. Dated: instant, then instant-before-interval at
+/// the same instant, then id. Undated: id.
+pub fn order_entries(entries: Vec<TimelineEntry>) -> (Vec<TimelineEntry>, Vec<TimelineEntry>) {
+    let (mut dated, mut undated): (Vec<_>, Vec<_>) =
+        entries.into_iter().partition(|e| e.at_nanos.is_some());
+    dated.sort_by(|a, b| {
+        (a.at_nanos, a.end_nanos.is_some(), a.end_nanos, &a.id).cmp(&(
+            b.at_nanos,
+            b.end_nanos.is_some(),
+            b.end_nanos,
+            &b.id,
+        ))
+    });
+    undated.sort_by(|a, b| a.id.cmp(&b.id));
+    (dated, undated)
+}
+
 /// Builds the merged timeline for one investigation.
 pub fn timeline(ws: &Workspace, investigation_id: &str) -> Result<TimelineModel, JobError> {
     // Refuses unknown investigations with the standard error.
@@ -110,111 +212,27 @@ pub fn timeline(ws: &Workspace, investigation_id: &str) -> Result<TimelineModel,
         .meta
         .list_markers(investigation_id, true)
         .map_err(ws_err)?;
-    for m in all_markers {
+    for m in &all_markers {
         if m.archived {
             archived_excluded += 1;
             continue;
         }
-        entries.push(TimelineEntry {
-            entry_kind: "marker".into(),
-            id: m.marker_id,
-            detail_kind: m.kind,
-            title: m.label,
-            at_nanos: m.at_nanos,
-            end_nanos: m.end_nanos,
-            time_source: if m.at_nanos.is_some() {
-                "marker"
-            } else {
-                "none"
-            }
-            .into(),
-            undated_reason: if m.at_nanos.is_some() {
-                None
-            } else {
-                Some("marker was entered without a timestamp".into())
-            },
-            description: m.description,
-            original_time_text: m.original_time_text,
-            original_tz_offset_min: m.original_tz_offset_min,
-        });
+        entries.push(marker_entry(m));
     }
 
     let all_evidence = ws
         .meta
         .list_evidence(investigation_id, true)
         .map_err(ws_err)?;
-    for ev in all_evidence {
+    for ev in &all_evidence {
         if ev.archived {
             archived_excluded += 1;
             continue;
         }
-        let (at, end, source, reason): (Option<i64>, Option<i64>, &str, Option<String>) =
-            match envelope::decode_reference(ev.envelope_version, &ev.reference_json) {
-                DecodeOutcome::Decoded(reference) => match reference {
-                    EvidenceReference::Event(e) => match e.event_time {
-                        Some(t) => (Some(t), None, "event_time", None),
-                        None => (
-                            None,
-                            None,
-                            "none",
-                            Some("the pinned event has no timestamp".into()),
-                        ),
-                    },
-                    EvidenceReference::HistogramInterval(i) => {
-                        (Some(i.start), Some(i.end), "interval_bounds", None)
-                    }
-                    EvidenceReference::Selection(s) => from_context(&s.context),
-                    EvidenceReference::Query(q) => from_context(&q.context),
-                    EvidenceReference::ExplorerGroup(g) => from_context(&g.context),
-                    EvidenceReference::ItemRef(_) => (
-                        None,
-                        None,
-                        "none",
-                        Some("manual item — carries no event time".into()),
-                    ),
-                },
-                DecodeOutcome::UnsupportedVersion { stored, supported } => (
-                    None,
-                    None,
-                    "none",
-                    Some(format!(
-                        "reference unreadable: envelope {stored} (supported {supported})"
-                    )),
-                ),
-                DecodeOutcome::Undecodable { .. } => {
-                    (None, None, "none", Some("reference unreadable".into()))
-                }
-            };
-        entries.push(TimelineEntry {
-            entry_kind: "evidence".into(),
-            id: ev.evidence_id,
-            detail_kind: ev.kind,
-            title: ev.title,
-            at_nanos: at,
-            end_nanos: end,
-            time_source: source.into(),
-            undated_reason: reason,
-            description: ev.annotation,
-            original_time_text: None,
-            original_tz_offset_min: None,
-        });
+        entries.push(evidence_entry(ev));
     }
 
-    // Deterministic order. Dated: by instant, then bounded-before-open at
-    // the same instant (an instant sorts before an interval starting
-    // there), then id as the final total-order tiebreak. Undated: by id —
-    // stable and independent of insertion order.
-    let (mut dated, mut undated): (Vec<_>, Vec<_>) =
-        entries.into_iter().partition(|e| e.at_nanos.is_some());
-    dated.sort_by(|a, b| {
-        (a.at_nanos, a.end_nanos.is_some(), a.end_nanos, &a.id).cmp(&(
-            b.at_nanos,
-            b.end_nanos.is_some(),
-            b.end_nanos,
-            &b.id,
-        ))
-    });
-    undated.sort_by(|a, b| a.id.cmp(&b.id));
+    let (dated, undated) = order_entries(entries);
 
     Ok(TimelineModel {
         dated,

@@ -406,7 +406,12 @@ fn main() {
             case_cmds::create_marker,
             case_cmds::update_marker,
             case_cmds::set_marker_archived,
-            case_cmds::investigation_timeline
+            case_cmds::investigation_timeline,
+            case_cmds::create_report_def,
+            case_cmds::update_report_def,
+            case_cmds::list_report_defs,
+            case_cmds::generate_report,
+            case_cmds::list_report_artifacts
         ])
         .run(tauri::generate_context!())
         .expect("error while running LogScope");

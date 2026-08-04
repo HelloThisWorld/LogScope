@@ -278,6 +278,13 @@ button:focus-visible, .link:focus-visible, input:focus-visible, select:focus-vis
 .tl-evidence { border-left-color: #5b6472; }
 .tl-time { flex: 0 0 auto; color: #9aa3b5; font-size: 12px; }
 .tl-title { word-break: break-word; }
+.report-section-row textarea { flex: 1; }
+.report-pick { display: flex; flex-direction: column; gap: 2px; min-width: 220px; }
+.status-completed { background: #1f4d2e; }
+.status-failed { background: #5a2430; }
+.status-running { background: #3a4356; }
+.status-cancelled { background: #4a3a1f; }
+
 .kind-deployment { background: #1f3a5a; }
 .kind-config_change { background: #4a3a1f; }
 .kind-operator_action { background: #3d2a4d; }

@@ -9,6 +9,7 @@ pub mod dto;
 pub mod explorer;
 pub mod export;
 pub mod import;
+pub mod report;
 pub mod timeline;
 
 pub use case::{

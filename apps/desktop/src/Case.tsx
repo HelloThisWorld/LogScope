@@ -24,6 +24,7 @@ import type {
 } from "./api";
 import EvidencePanel from "./EvidencePanel";
 import Timeline from "./Timeline";
+import Reports from "./Reports";
 
 /** Per-entity save indicator; `conflicted` means the row changed under us. */
 export type SaveState = {
@@ -940,6 +941,8 @@ export default function CaseView({
               tracked={tracked}
               reload={reloadSelected}
             />
+
+            <Reports bundle={bundle} saves={saves} tracked={tracked} />
 
             <h4>Activity</h4>
             <ul className="activity">

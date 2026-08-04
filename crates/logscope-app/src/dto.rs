@@ -872,6 +872,86 @@ pub struct TimelineDto {
     pub archived_excluded: i64,
 }
 
+// ---- reports ----------------------------------------------------------
+
+/// One ordered report section. Narrative kinds carry user-authored
+/// content (blank renders the explicit word `unknown`); projection kinds
+/// (`timeline`/`hypotheses`/`evidence`) ignore `content`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SectionDto {
+    pub kind: String,
+    pub content: Option<String>,
+}
+
+/// A selected child at the exact revision the author chose.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SelectedRefDto {
+    pub id: String,
+    #[ts(type = "number")]
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ReportDefDto {
+    pub report_def_id: String,
+    pub investigation_id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub sections: Vec<SectionDto>,
+    pub selected_evidence: Vec<SelectedRefDto>,
+    pub selected_markers: Vec<SelectedRefDto>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[ts(type = "number")]
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NewReportDefDto {
+    pub investigation_id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub sections: Vec<SectionDto>,
+    pub selected_evidence: Vec<SelectedRefDto>,
+    pub selected_markers: Vec<SelectedRefDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ReportDefEditDto {
+    pub report_def_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: i64,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub sections: Vec<SectionDto>,
+    pub selected_evidence: Vec<SelectedRefDto>,
+    pub selected_markers: Vec<SelectedRefDto>,
+}
+
+/// Immutable generation record.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ReportArtifactDto {
+    pub artifact_id: String,
+    pub report_def_id: String,
+    /// `markdown` or `html`.
+    pub format: String,
+    pub destination_path: String,
+    pub checksum_sha256: Option<String>,
+    #[ts(type = "number | null")]
+    pub byte_size: Option<i64>,
+    /// `running | completed | failed | cancelled`.
+    pub status: String,
+    pub error_json: Option<String>,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
 // ---- jump-back --------------------------------------------------------
 
 /// Decoded restore instructions for one evidence item: exactly what was
