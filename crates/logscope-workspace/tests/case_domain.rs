@@ -900,3 +900,110 @@ fn report_defs_are_versioned_and_artifacts_finish_exactly_once() {
     let listed = db.list_report_artifacts("inv-r").unwrap();
     assert_eq!(listed.len(), 2);
 }
+
+// ---- redaction profiles ------------------------------------------------------
+
+#[test]
+fn redaction_profile_version_bumps_only_on_semantic_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MetaDb::open(&dir.path().join("workspace.db")).unwrap();
+
+    let p = db
+        .create_redaction_profile(
+            "red-1",
+            "customer disclosure",
+            r#"[{"kind":"mask_field","field":"user"}]"#,
+            "{}",
+        )
+        .unwrap();
+    assert_eq!((p.profile_version, p.revision), (1, 1));
+
+    // Pure rename: revision moves, profile_version does not.
+    let renamed = db
+        .update_redaction_profile(
+            "red-1",
+            1,
+            "customer disclosure v2",
+            r#"[{"kind":"mask_field","field":"user"}]"#,
+            "{}",
+        )
+        .unwrap();
+    assert_eq!((renamed.profile_version, renamed.revision), (1, 2));
+
+    // Rule change: both move.
+    let changed = db
+        .update_redaction_profile(
+            "red-1",
+            2,
+            "customer disclosure v2",
+            r#"[{"kind":"omit_field","field":"user"}]"#,
+            "{}",
+        )
+        .unwrap();
+    assert_eq!((changed.profile_version, changed.revision), (2, 3));
+
+    // Posture change alone also bumps the profile version.
+    let posture = db
+        .update_redaction_profile(
+            "red-1",
+            3,
+            "customer disclosure v2",
+            r#"[{"kind":"omit_field","field":"user"}]"#,
+            r#"{"path_policy":"omit"}"#,
+        )
+        .unwrap();
+    assert_eq!(posture.profile_version, 3);
+
+    // Stale updates conflict.
+    assert!(matches!(
+        db.update_redaction_profile("red-1", 1, "x", "[]", "{}"),
+        Err(WorkspaceError::StaleRevision { .. })
+    ));
+
+    // History carries every change.
+    let actions: Vec<String> = db
+        .list_entity_history("redaction_profile", "red-1")
+        .unwrap()
+        .iter()
+        .map(|h| h.action.clone())
+        .collect();
+    assert_eq!(actions, ["created", "edited", "edited", "edited"]);
+}
+
+#[test]
+fn report_defs_attach_and_detach_redaction_profiles() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MetaDb::open(&dir.path().join("workspace.db")).unwrap();
+    db.create_investigation(&new_inv("inv-rp", "Redact"))
+        .unwrap();
+    db.create_redaction_profile("red-a", "profile", "[]", "{}")
+        .unwrap();
+    let def = db
+        .create_report_def(&logscope_workspace::NewReportDef {
+            report_def_id: "rep-r".into(),
+            investigation_id: "inv-rp".into(),
+            title: "t".into(),
+            subtitle: None,
+            sections_json: "[]".into(),
+            selected_evidence_json: "[]".into(),
+            selected_markers_json: "[]".into(),
+            options_json: "{}".into(),
+        })
+        .unwrap();
+    assert_eq!(def.redaction_profile_id, None);
+
+    let attached = db
+        .set_report_def_redaction("rep-r", def.revision, Some("red-a"))
+        .unwrap();
+    assert_eq!(attached.redaction_profile_id.as_deref(), Some("red-a"));
+
+    // Attaching an unknown profile is refused by the FK.
+    assert!(db
+        .set_report_def_redaction("rep-r", attached.revision, Some("red-nope"))
+        .is_err());
+
+    let detached = db
+        .set_report_def_redaction("rep-r", attached.revision, None)
+        .unwrap();
+    assert_eq!(detached.redaction_profile_id, None);
+}

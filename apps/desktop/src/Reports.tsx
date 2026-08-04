@@ -14,12 +14,14 @@ import {
 } from "./api";
 import type {
   InvestigationBundleDto,
+  RedactionProfileDto,
   ReportArtifactDto,
   ReportDefDto,
   SectionDto,
   SelectedRefDto,
 } from "./api";
 import type { SaveState } from "./Case";
+import RedactionPanel from "./RedactionPanel";
 
 type Narrative = (typeof NARRATIVE_SECTION_KINDS)[number];
 
@@ -100,14 +102,20 @@ export default function Reports({
   const invId = bundle.investigation.investigation_id;
   const [defs, setDefs] = useState<ReportDefDto[]>([]);
   const [artifacts, setArtifacts] = useState<ReportArtifactDto[]>([]);
+  const [profiles, setProfiles] = useState<RedactionProfileDto[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null); // null = closed, "" = new
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [status, setStatus] = useState("");
+  const [preview, setPreview] = useState<{
+    title: string;
+    text: string;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
       setDefs(await api.listReportDefs(invId));
       setArtifacts(await api.listReportArtifacts(invId));
+      setProfiles(await api.listRedactionProfiles());
     } catch (e) {
       setStatus(errorText(e));
     }
@@ -203,6 +211,52 @@ export default function Reports({
               </span>
               <SaveBadge state={saves[d.report_def_id]} />
               <span className="spacer" />
+              <label className="dim">
+                disclosure
+                <select
+                  value={d.redaction_profile_id ?? ""}
+                  aria-label="Disclosure profile"
+                  onChange={(e) =>
+                    void tracked(
+                      d.report_def_id,
+                      async () => {
+                        await api.setReportDefRedaction(
+                          d.report_def_id,
+                          d.revision,
+                          e.target.value || null,
+                        );
+                      },
+                      load,
+                    )
+                  }
+                >
+                  <option value="">(none — verbatim)</option>
+                  {profiles.map((p) => (
+                    <option key={p.profile_id} value={p.profile_id}>
+                      {p.name} v{p.profile_version}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                onClick={() =>
+                  void (async () => {
+                    try {
+                      setPreview({
+                        title: `${d.title} — markdown preview (exact final bytes)`,
+                        text: await api.previewReport(
+                          d.report_def_id,
+                          "markdown",
+                        ),
+                      });
+                    } catch (e) {
+                      setStatus(errorText(e));
+                    }
+                  })()
+                }
+              >
+                Preview
+              </button>
               <button onClick={() => void generate(d, "markdown")}>
                 Generate Markdown
               </button>
@@ -348,6 +402,31 @@ export default function Reports({
           </div>
         </div>
       )}
+
+      {preview && (
+        <div className="modal-overlay" onClick={() => setPreview(null)}>
+          <div
+            className="modal modal-wide"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report preview"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="row">
+              <h3>{preview.title}</h3>
+              <span className="spacer" />
+              <button onClick={() => setPreview(null)}>Close</button>
+            </div>
+            <p className="dim">
+              This preview is produced by the same projection as generation —
+              what you read here is byte-for-byte what will be published.
+            </p>
+            <pre className="snapshot preview-pre">{preview.text}</pre>
+          </div>
+        </div>
+      )}
+
+      <RedactionPanel onChanged={() => void load()} />
 
       {artifacts.length > 0 && (
         <>

@@ -2630,6 +2630,7 @@ dependencies = [
  "logscope-store",
  "logscope-workspace",
  "parking_lot",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

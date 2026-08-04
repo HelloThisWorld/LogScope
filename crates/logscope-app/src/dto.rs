@@ -903,6 +903,8 @@ pub struct ReportDefDto {
     pub sections: Vec<SectionDto>,
     pub selected_evidence: Vec<SelectedRefDto>,
     pub selected_markers: Vec<SelectedRefDto>,
+    /// Attached disclosure profile, when any.
+    pub redaction_profile_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     #[ts(type = "number")]
@@ -950,6 +952,27 @@ pub struct ReportArtifactDto {
     pub error_json: Option<String>,
     pub created_at: String,
     pub finished_at: Option<String>,
+}
+
+// ---- redaction --------------------------------------------------------
+
+/// Disclosure profile. `rules_json`/`posture_json` are the stored
+/// documents; they are validated by compiling the projection at every
+/// save and load, never trusted as-is.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RedactionProfileDto {
+    pub profile_id: String,
+    pub name: String,
+    /// Bumps on every rule/posture change; artifacts name it.
+    #[ts(type = "number")]
+    pub profile_version: i64,
+    pub rules_json: String,
+    pub posture_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[ts(type = "number")]
+    pub revision: i64,
 }
 
 // ---- jump-back --------------------------------------------------------

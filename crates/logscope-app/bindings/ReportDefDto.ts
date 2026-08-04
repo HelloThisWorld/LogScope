@@ -2,4 +2,8 @@
 import type { SectionDto } from "./SectionDto";
 import type { SelectedRefDto } from "./SelectedRefDto";
 
-export type ReportDefDto = { report_def_id: string, investigation_id: string, title: string, subtitle: string | null, sections: Array<SectionDto>, selected_evidence: Array<SelectedRefDto>, selected_markers: Array<SelectedRefDto>, created_at: string, updated_at: string, revision: number, };
+export type ReportDefDto = { report_def_id: string, investigation_id: string, title: string, subtitle: string | null, sections: Array<SectionDto>, selected_evidence: Array<SelectedRefDto>, selected_markers: Array<SelectedRefDto>, 
+/**
+ * Attached disclosure profile, when any.
+ */
+redaction_profile_id: string | null, created_at: string, updated_at: string, revision: number, };
