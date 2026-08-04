@@ -975,6 +975,46 @@ pub struct RedactionProfileDto {
     pub revision: i64,
 }
 
+// ---- bundles ----------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BundleExportDto {
+    pub bundle_id: String,
+    pub investigation_id: String,
+    pub destination_path: String,
+    pub checksum_sha256: Option<String>,
+    #[ts(type = "number | null")]
+    pub byte_size: Option<i64>,
+    /// `running | completed | failed | cancelled`.
+    pub status: String,
+    /// `full_within_declared_dataset_revision | included_subset_only | snapshot_only`.
+    pub reproduction_scope: Option<String>,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BundleImportSummaryDto {
+    pub investigation_id: String,
+    #[ts(type = "number")]
+    pub evidence: i64,
+    #[ts(type = "number")]
+    pub hypotheses: i64,
+    #[ts(type = "number")]
+    pub items: i64,
+    #[ts(type = "number")]
+    pub markers: i64,
+    #[ts(type = "number")]
+    pub saved_searches: i64,
+    #[ts(type = "number")]
+    pub reports: i64,
+    pub data_included: bool,
+    /// Where the new isolated workspace was created.
+    pub workspace_root: String,
+}
+
 // ---- jump-back --------------------------------------------------------
 
 /// Decoded restore instructions for one evidence item: exactly what was

@@ -62,6 +62,8 @@ import type { NewReportDefDto } from "./bindings/NewReportDefDto";
 import type { ReportDefEditDto } from "./bindings/ReportDefEditDto";
 import type { ReportArtifactDto } from "./bindings/ReportArtifactDto";
 import type { RedactionProfileDto } from "./bindings/RedactionProfileDto";
+import type { BundleExportDto } from "./bindings/BundleExportDto";
+import type { BundleImportSummaryDto } from "./bindings/BundleImportSummaryDto";
 
 export type {
   WorkspaceInfoDto,
@@ -119,6 +121,8 @@ export type {
   ReportDefEditDto,
   ReportArtifactDto,
   RedactionProfileDto,
+  BundleExportDto,
+  BundleImportSummaryDto,
 };
 
 /// Section vocabulary in canonical order (mirrors report::SECTION_KINDS).
@@ -517,4 +521,29 @@ export const api = {
     }),
   previewReport: (reportDefId: string, format: "markdown" | "html") =>
     invoke<string>("preview_report", { reportDefId, format }),
+
+  exportCaseBundle: (
+    investigationId: string,
+    destination: string,
+    redactionProfileId: string | null,
+    includeReports: boolean,
+  ) =>
+    invoke<BundleExportDto>("export_case_bundle", {
+      investigationId,
+      destination,
+      redactionProfileId,
+      includeReports,
+    }),
+  listBundleExports: (investigationId: string) =>
+    invoke<BundleExportDto[]>("list_bundle_exports", { investigationId }),
+  importCaseBundle: (
+    bundlePath: string,
+    newWorkspaceRoot: string,
+    workspaceName: string,
+  ) =>
+    invoke<BundleImportSummaryDto>("import_case_bundle", {
+      bundlePath,
+      newWorkspaceRoot,
+      workspaceName,
+    }),
 };

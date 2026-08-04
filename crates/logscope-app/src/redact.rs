@@ -91,7 +91,7 @@ impl Default for RedactionPosture {
 }
 
 /// Honest application counts, rendered into the artifact.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RedactionSummary {
     pub fields_omitted: u64,
     pub fields_masked: u64,

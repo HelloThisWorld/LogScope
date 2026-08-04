@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use std::path::PathBuf;
 
+use logscope_app::bundle::{self, BundleOptions};
 use logscope_app::case;
 use logscope_app::dto::*;
 use logscope_app::redact::Projection;
@@ -1167,6 +1168,102 @@ pub fn preview_report(
         )
     })?;
     report::render_preview(&ws, &report_def_id, fmt).map_err(|e| jerr(&e))
+}
+
+// ---- case bundles --------------------------------------------------------
+
+fn bundle_dto(row: logscope_workspace::BundleExportRow) -> BundleExportDto {
+    let scope = row
+        .manifest_json
+        .as_deref()
+        .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+        .and_then(|v| {
+            v.get("reproduction_scope")
+                .and_then(|s| s.as_str())
+                .map(str::to_string)
+        });
+    BundleExportDto {
+        bundle_id: row.bundle_id,
+        investigation_id: row.investigation_id,
+        destination_path: row.destination_path,
+        checksum_sha256: row.checksum_sha256,
+        byte_size: row.byte_size,
+        status: row.status,
+        reproduction_scope: scope,
+        created_at: row.created_at,
+        finished_at: row.finished_at,
+    }
+}
+
+/// Exports one investigation as a `.logscope-case` bundle. Runs on a
+/// pooled engine because the data-subset closure queries parquet.
+#[tauri::command]
+pub fn export_case_bundle(
+    state: State<'_, AppState>,
+    investigation_id: String,
+    destination: String,
+    redaction_profile_id: Option<String>,
+    include_reports: bool,
+) -> CmdResult<BundleExportDto> {
+    let ws = ws_handle(&state)?;
+    let options = BundleOptions {
+        redaction_profile_id,
+        include_reports,
+    };
+    with_engine(&state, None, |engine, _| {
+        bundle::export_bundle(
+            &ws,
+            engine,
+            &investigation_id,
+            &PathBuf::from(&destination),
+            &options,
+        )
+        .map(bundle_dto)
+        .map_err(|e| jerr(&e))
+    })
+}
+
+#[tauri::command]
+pub fn list_bundle_exports(
+    state: State<'_, AppState>,
+    investigation_id: String,
+) -> CmdResult<Vec<BundleExportDto>> {
+    let ws = ws_handle(&state)?;
+    Ok(ws
+        .meta
+        .list_bundle_exports(&investigation_id)
+        .map_err(ws_err)?
+        .into_iter()
+        .map(bundle_dto)
+        .collect())
+}
+
+/// Imports a bundle into a NEW isolated workspace. Requires no open
+/// workspace; the destination must not exist.
+#[tauri::command]
+pub fn import_case_bundle(
+    bundle_path: String,
+    new_workspace_root: String,
+    workspace_name: String,
+) -> CmdResult<BundleImportSummaryDto> {
+    let summary = bundle::import_bundle(
+        &PathBuf::from(&bundle_path),
+        &PathBuf::from(&new_workspace_root),
+        &workspace_name,
+        env!("CARGO_PKG_VERSION"),
+    )
+    .map_err(|e| jerr(&e))?;
+    Ok(BundleImportSummaryDto {
+        investigation_id: summary.investigation_id,
+        evidence: summary.evidence as i64,
+        hypotheses: summary.hypotheses as i64,
+        items: summary.items as i64,
+        markers: summary.markers as i64,
+        saved_searches: summary.saved_searches as i64,
+        reports: summary.reports as i64,
+        data_included: summary.data_included,
+        workspace_root: new_workspace_root,
+    })
 }
 
 // ---- jump-back ----------------------------------------------------------

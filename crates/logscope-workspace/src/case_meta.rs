@@ -344,6 +344,33 @@ pub struct RedactionProfileRow {
     pub revision: i64,
 }
 
+/// Immutable bundle-export record (same two-phase discipline as report
+/// artifacts: `running` inserted before any byte, finished exactly once).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BundleExportRow {
+    pub bundle_id: String,
+    pub investigation_id: String,
+    pub destination_path: String,
+    pub manifest_json: Option<String>,
+    pub checksum_sha256: Option<String>,
+    pub byte_size: Option<i64>,
+    pub status: String,
+    pub error_json: Option<String>,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
+/// Import provenance recorded in the DESTINATION workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BundleImportRow {
+    pub import_id: String,
+    pub original_bundle_path: String,
+    pub bundle_checksum: String,
+    pub manifest_json: String,
+    pub imported_at: String,
+    pub detail_json: String,
+}
+
 /// Immutable generation record. A row is inserted `running` before any
 /// byte is written and finished exactly once; a crash leaves the
 /// `running` tombstone as honest evidence of the interrupted attempt.
@@ -678,6 +705,52 @@ fn get_redaction_profile_tx(
         id: id.to_string(),
     })
 }
+
+fn map_bundle_export(r: &rusqlite::Row<'_>) -> rusqlite::Result<BundleExportRow> {
+    Ok(BundleExportRow {
+        bundle_id: r.get(0)?,
+        investigation_id: r.get(1)?,
+        destination_path: r.get(2)?,
+        manifest_json: r.get(3)?,
+        checksum_sha256: r.get(4)?,
+        byte_size: r.get(5)?,
+        status: r.get(6)?,
+        error_json: r.get(7)?,
+        created_at: r.get(8)?,
+        finished_at: r.get(9)?,
+    })
+}
+
+const BUNDLE_EXPORT_COLS: &str = "bundle_id, investigation_id, destination_path, manifest_json, \
+     checksum_sha256, byte_size, status, error_json, created_at, finished_at";
+
+/// Fetch on an already-held connection (see `raw()` reentrancy).
+fn get_bundle_export_conn(conn: &Connection, id: &str) -> Result<BundleExportRow, WorkspaceError> {
+    conn.query_row(
+        &format!("SELECT {BUNDLE_EXPORT_COLS} FROM bundle_exports WHERE bundle_id = ?1"),
+        params![id],
+        map_bundle_export,
+    )
+    .optional()?
+    .ok_or_else(|| WorkspaceError::MissingEntity {
+        kind: "bundle_export",
+        id: id.to_string(),
+    })
+}
+
+fn map_bundle_import(r: &rusqlite::Row<'_>) -> rusqlite::Result<BundleImportRow> {
+    Ok(BundleImportRow {
+        import_id: r.get(0)?,
+        original_bundle_path: r.get(1)?,
+        bundle_checksum: r.get(2)?,
+        manifest_json: r.get(3)?,
+        imported_at: r.get(4)?,
+        detail_json: r.get(5)?,
+    })
+}
+
+const BUNDLE_IMPORT_COLS: &str = "import_id, original_bundle_path, bundle_checksum, \
+     manifest_json, imported_at, detail_json";
 
 /// A bounded marker interval must have a start, and must end after it.
 fn check_marker_bounds(at: Option<i64>, end: Option<i64>) -> Result<(), WorkspaceError> {
@@ -1966,6 +2039,125 @@ impl MetaDb {
         ))?;
         let rows = stmt
             .query_map(params![investigation_id], map_artifact)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    // ---- bundle exports + imports ----------------------------------------------
+
+    pub fn start_bundle_export(
+        &self,
+        bundle_id: &str,
+        investigation_id: &str,
+        destination_path: &str,
+    ) -> Result<BundleExportRow, WorkspaceError> {
+        let conn = self.raw();
+        conn.execute(
+            "INSERT INTO bundle_exports
+               (bundle_id, investigation_id, destination_path, manifest_json,
+                checksum_sha256, byte_size, status, error_json, created_at, finished_at)
+             VALUES (?1, ?2, ?3, NULL, NULL, NULL, 'running', NULL, ?4, NULL)",
+            params![bundle_id, investigation_id, destination_path, now()],
+        )?;
+        get_bundle_export_conn(&conn, bundle_id)
+    }
+
+    /// Finishes an export record exactly once (`running` rows only).
+    pub fn finish_bundle_export(
+        &self,
+        bundle_id: &str,
+        status: &str,
+        manifest_json: Option<&str>,
+        checksum_sha256: Option<&str>,
+        byte_size: Option<i64>,
+        error_json: Option<&str>,
+    ) -> Result<BundleExportRow, WorkspaceError> {
+        if !matches!(status, "completed" | "failed" | "cancelled") {
+            return Err(WorkspaceError::Invalid(format!(
+                "invalid terminal bundle status {status:?}"
+            )));
+        }
+        let conn = self.raw();
+        let n = conn.execute(
+            "UPDATE bundle_exports SET status = ?1, manifest_json = ?2,
+                checksum_sha256 = ?3, byte_size = ?4, error_json = ?5, finished_at = ?6
+             WHERE bundle_id = ?7 AND status = 'running'",
+            params![
+                status,
+                manifest_json,
+                checksum_sha256,
+                byte_size,
+                error_json,
+                now(),
+                bundle_id
+            ],
+        )?;
+        if n == 0 {
+            return Err(WorkspaceError::Invalid(format!(
+                "bundle export {bundle_id} is not running (already finished or unknown)"
+            )));
+        }
+        get_bundle_export_conn(&conn, bundle_id)
+    }
+
+    pub fn list_bundle_exports(
+        &self,
+        investigation_id: &str,
+    ) -> Result<Vec<BundleExportRow>, WorkspaceError> {
+        let conn = self.raw();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {BUNDLE_EXPORT_COLS} FROM bundle_exports
+             WHERE investigation_id = ?1 ORDER BY created_at DESC, bundle_id"
+        ))?;
+        let rows = stmt
+            .query_map(params![investigation_id], map_bundle_export)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Records import provenance in the destination workspace.
+    pub fn record_bundle_import(
+        &self,
+        import_id: &str,
+        original_bundle_path: &str,
+        bundle_checksum: &str,
+        manifest_json: &str,
+        detail_json: &str,
+    ) -> Result<BundleImportRow, WorkspaceError> {
+        let conn = self.raw();
+        conn.execute(
+            "INSERT INTO bundle_imports
+               (import_id, original_bundle_path, bundle_checksum, manifest_json,
+                imported_at, detail_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                import_id,
+                original_bundle_path,
+                bundle_checksum,
+                manifest_json,
+                now(),
+                detail_json
+            ],
+        )?;
+        conn.query_row(
+            &format!("SELECT {BUNDLE_IMPORT_COLS} FROM bundle_imports WHERE import_id = ?1"),
+            params![import_id],
+            map_bundle_import,
+        )
+        .optional()?
+        .ok_or_else(|| WorkspaceError::MissingEntity {
+            kind: "bundle_import",
+            id: import_id.to_string(),
+        })
+    }
+
+    pub fn list_bundle_imports(&self) -> Result<Vec<BundleImportRow>, WorkspaceError> {
+        let conn = self.raw();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {BUNDLE_IMPORT_COLS} FROM bundle_imports ORDER BY imported_at DESC, import_id"
+        ))?;
+        let rows = stmt
+            .query_map([], map_bundle_import)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
