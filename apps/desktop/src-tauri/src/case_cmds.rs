@@ -8,11 +8,12 @@ use std::sync::Arc;
 
 use logscope_app::case;
 use logscope_app::dto::*;
+use logscope_app::timeline;
 use logscope_case::envelope::{self, DecodeOutcome, EvidenceReference};
 use logscope_jobs::JobEvent;
 use logscope_workspace::{
     EvidenceGroupRow, EvidenceRow, HistoryRow, HypothesisRow, InvestigationEdit, InvestigationRow,
-    ItemRow, NewHypothesis, NewInvestigation, NewItem, Workspace,
+    ItemRow, MarkerEdit, MarkerRow, NewHypothesis, NewInvestigation, NewItem, NewMarker, Workspace,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -136,6 +137,73 @@ fn hist_dto(row: HistoryRow) -> HistoryDto {
         action: row.action,
         detail_json: row.detail_json,
         created_at: row.created_at,
+    }
+}
+
+fn marker_dto(row: MarkerRow) -> MarkerDto {
+    MarkerDto {
+        marker_id: row.marker_id,
+        investigation_id: row.investigation_id,
+        kind: row.kind,
+        label: row.label,
+        description: row.description,
+        at_nanos: row.at_nanos,
+        end_nanos: row.end_nanos,
+        original_tz_offset_min: row.original_tz_offset_min,
+        original_time_text: row.original_time_text,
+        position: row.position,
+        archived: row.archived,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        revision: row.revision,
+    }
+}
+
+/// Parses the optional marker time texts. The instant is normalized to
+/// UTC; the text and offset are preserved exactly as entered.
+type MarkerTimes = (Option<i64>, Option<i64>, Option<i64>, Option<String>);
+
+fn marker_times(
+    time_text: &Option<String>,
+    end_time_text: &Option<String>,
+) -> CmdResult<MarkerTimes> {
+    let jmap = |e: &logscope_jobs::JobError| ErrorDto::new(&e.code, &e.message);
+    let (at, offset) = match time_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        Some(t) => {
+            let (n, off) = timeline::parse_marker_time(t).map_err(|e| jmap(&e))?;
+            (Some(n), Some(off))
+        }
+        None => (None, None),
+    };
+    let end = match end_time_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        Some(t) => Some(timeline::parse_marker_time(t).map_err(|e| jmap(&e))?.0),
+        None => None,
+    };
+    let original = time_text.clone().filter(|t| !t.trim().is_empty());
+    Ok((at, end, offset, original))
+}
+
+fn timeline_entry_dto(e: timeline::TimelineEntry) -> TimelineEntryDto {
+    TimelineEntryDto {
+        entry_kind: e.entry_kind,
+        id: e.id,
+        detail_kind: e.detail_kind,
+        title: e.title,
+        at_nanos: e.at_nanos,
+        end_nanos: e.end_nanos,
+        time_source: e.time_source,
+        undated_reason: e.undated_reason,
+        description: e.description,
+        original_time_text: e.original_time_text,
+        original_tz_offset_min: e.original_tz_offset_min,
     }
 }
 
@@ -276,12 +344,108 @@ pub fn investigation_bundle(
         .into_iter()
         .map(group_dto)
         .collect();
+    let markers = ws
+        .meta
+        .list_markers(&investigation_id, true)
+        .map_err(ws_err)?
+        .into_iter()
+        .map(marker_dto)
+        .collect();
     Ok(InvestigationBundleDto {
         investigation: inv_dto(investigation),
         hypotheses,
         items,
         evidence,
         groups,
+        markers,
+    })
+}
+
+// ---- timeline markers ---------------------------------------------------
+
+#[tauri::command]
+pub fn create_marker(state: State<'_, AppState>, request: NewMarkerDto) -> CmdResult<MarkerDto> {
+    let ws = ws_handle(&state)?;
+    if logscope_case::MarkerKind::parse(&request.kind).is_none() {
+        return Err(err(
+            "case/invalid",
+            format!(
+                "unknown marker kind {:?} (expected {})",
+                request.kind,
+                logscope_case::MarkerKind::EXPECTED
+            ),
+        ));
+    }
+    let (at_nanos, end_nanos, original_tz_offset_min, original_time_text) =
+        marker_times(&request.time_text, &request.end_time_text)?;
+    let new = NewMarker {
+        marker_id: format!("mark-{}", uuid::Uuid::new_v4()),
+        investigation_id: request.investigation_id,
+        kind: request.kind,
+        label: request.label,
+        description: request.description,
+        at_nanos,
+        end_nanos,
+        original_tz_offset_min,
+        original_time_text,
+    };
+    ws.meta.create_marker(&new).map(marker_dto).map_err(ws_err)
+}
+
+#[tauri::command]
+pub fn update_marker(state: State<'_, AppState>, request: MarkerEditDto) -> CmdResult<MarkerDto> {
+    let ws = ws_handle(&state)?;
+    if logscope_case::MarkerKind::parse(&request.kind).is_none() {
+        return Err(err(
+            "case/invalid",
+            format!(
+                "unknown marker kind {:?} (expected {})",
+                request.kind,
+                logscope_case::MarkerKind::EXPECTED
+            ),
+        ));
+    }
+    let (at_nanos, end_nanos, original_tz_offset_min, original_time_text) =
+        marker_times(&request.time_text, &request.end_time_text)?;
+    let edit = MarkerEdit {
+        marker_id: request.marker_id,
+        expected_revision: request.expected_revision,
+        kind: request.kind,
+        label: request.label,
+        description: request.description,
+        at_nanos,
+        end_nanos,
+        original_tz_offset_min,
+        original_time_text,
+    };
+    ws.meta.update_marker(&edit).map(marker_dto).map_err(ws_err)
+}
+
+#[tauri::command]
+pub fn set_marker_archived(
+    state: State<'_, AppState>,
+    marker_id: String,
+    expected_revision: i64,
+    archived: bool,
+) -> CmdResult<MarkerDto> {
+    let ws = ws_handle(&state)?;
+    ws.meta
+        .set_marker_archived(&marker_id, expected_revision, archived)
+        .map(marker_dto)
+        .map_err(ws_err)
+}
+
+#[tauri::command]
+pub fn investigation_timeline(
+    state: State<'_, AppState>,
+    investigation_id: String,
+) -> CmdResult<TimelineDto> {
+    let ws = ws_handle(&state)?;
+    let model = timeline::timeline(&ws, &investigation_id).map_err(|e| jerr(&e))?;
+    Ok(TimelineDto {
+        dated: model.dated.into_iter().map(timeline_entry_dto).collect(),
+        undated: model.undated.into_iter().map(timeline_entry_dto).collect(),
+        archived_excluded: model.archived_excluded,
     })
 }
 

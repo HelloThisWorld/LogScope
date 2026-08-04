@@ -15,7 +15,8 @@ pub mod workspace;
 
 pub use case_meta::{
     EvidenceGroupRow, EvidenceRow, HistoryRow, HypothesisRow, InvestigationEdit, InvestigationRow,
-    ItemRow, NewEvidence, NewHypothesis, NewInvestigation, NewItem, NewScopeRef, ScopeRefRow,
+    ItemRow, MarkerEdit, MarkerRow, NewEvidence, NewHypothesis, NewInvestigation, NewItem,
+    NewMarker, NewScopeRef, ScopeRefRow,
 };
 pub use error::WorkspaceError;
 pub use explorer_meta::{

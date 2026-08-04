@@ -23,6 +23,7 @@ import type {
   RestoreContextDto,
 } from "./api";
 import EvidencePanel from "./EvidencePanel";
+import Timeline from "./Timeline";
 
 /** Per-entity save indicator; `conflicted` means the row changed under us. */
 export type SaveState = {
@@ -931,6 +932,13 @@ export default function CaseView({
               tracked={tracked}
               reload={reloadSelected}
               onJumpToExplorer={onJumpToExplorer}
+            />
+
+            <Timeline
+              bundle={bundle}
+              saves={saves}
+              tracked={tracked}
+              reload={reloadSelected}
             />
 
             <h4>Activity</h4>

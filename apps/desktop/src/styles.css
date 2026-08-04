@@ -271,3 +271,15 @@ button:focus-visible, .link:focus-visible, input:focus-visible, select:focus-vis
   border: 1px solid #2a3242; border-radius: 4px; padding: 8px; background: #131926;
 }
 .pin-summary code { word-break: break-all; }
+
+.tl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.tl-entry { display: flex; gap: 8px; align-items: baseline; padding: 2px 4px; border-left: 3px solid #2a3242; }
+.tl-marker { border-left-color: #8fb7e8; }
+.tl-evidence { border-left-color: #5b6472; }
+.tl-time { flex: 0 0 auto; color: #9aa3b5; font-size: 12px; }
+.tl-title { word-break: break-word; }
+.kind-deployment { background: #1f3a5a; }
+.kind-config_change { background: #4a3a1f; }
+.kind-operator_action { background: #3d2a4d; }
+.kind-custom { background: #2a3242; }
+.mono { font-family: ui-monospace, Consolas, monospace; }

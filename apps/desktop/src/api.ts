@@ -50,6 +50,11 @@ import type { VerifyStartedDto } from "./bindings/VerifyStartedDto";
 import type { VerifyFinishedDto } from "./bindings/VerifyFinishedDto";
 import type { VerificationReportDto } from "./bindings/VerificationReportDto";
 import type { RestoreContextDto } from "./bindings/RestoreContextDto";
+import type { MarkerDto } from "./bindings/MarkerDto";
+import type { NewMarkerDto } from "./bindings/NewMarkerDto";
+import type { MarkerEditDto } from "./bindings/MarkerEditDto";
+import type { TimelineDto } from "./bindings/TimelineDto";
+import type { TimelineEntryDto } from "./bindings/TimelineEntryDto";
 
 export type {
   WorkspaceInfoDto,
@@ -95,7 +100,19 @@ export type {
   VerifyFinishedDto,
   VerificationReportDto,
   RestoreContextDto,
+  MarkerDto,
+  NewMarkerDto,
+  MarkerEditDto,
+  TimelineDto,
+  TimelineEntryDto,
 };
+
+export const MARKER_KINDS = [
+  "deployment",
+  "config_change",
+  "operator_action",
+  "custom",
+] as const;
 
 /// Vocabulary mirrors of `logscope-case::vocab` (storage strings).
 export const INVESTIGATION_STATUSES = [
@@ -387,4 +404,21 @@ export const api = {
     }),
   evidenceRestoreContext: (evidenceId: string) =>
     invoke<RestoreContextDto>("evidence_restore_context", { evidenceId }),
+
+  createMarker: (request: NewMarkerDto) =>
+    invoke<MarkerDto>("create_marker", { request }),
+  updateMarker: (request: MarkerEditDto) =>
+    invoke<MarkerDto>("update_marker", { request }),
+  setMarkerArchived: (
+    markerId: string,
+    expectedRevision: number,
+    archived: boolean,
+  ) =>
+    invoke<MarkerDto>("set_marker_archived", {
+      markerId,
+      expectedRevision,
+      archived,
+    }),
+  investigationTimeline: (investigationId: string) =>
+    invoke<TimelineDto>("investigation_timeline", { investigationId }),
 };

@@ -235,6 +235,56 @@ pub struct NewEvidence {
     pub snapshot_json: String,
 }
 
+/// Manual timeline marker. Markers are never inferred from log content;
+/// the original timestamp text and zone offset are preserved exactly as
+/// the user entered them, alongside the normalized UTC instant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkerRow {
+    pub marker_id: String,
+    pub investigation_id: String,
+    pub kind: String,
+    pub label: String,
+    pub description: Option<String>,
+    /// UTC instant; `None` places the marker in the undated section.
+    pub at_nanos: Option<i64>,
+    /// Optional bounded-interval end (exclusive). Requires `at_nanos`.
+    pub end_nanos: Option<i64>,
+    pub original_tz_offset_min: Option<i64>,
+    pub original_time_text: Option<String>,
+    pub position: i64,
+    pub archived: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewMarker {
+    pub marker_id: String,
+    pub investigation_id: String,
+    pub kind: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub at_nanos: Option<i64>,
+    pub end_nanos: Option<i64>,
+    pub original_tz_offset_min: Option<i64>,
+    pub original_time_text: Option<String>,
+}
+
+/// Full editable-field update for a marker.
+#[derive(Debug, Clone)]
+pub struct MarkerEdit {
+    pub marker_id: String,
+    pub expected_revision: i64,
+    pub kind: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub at_nanos: Option<i64>,
+    pub end_nanos: Option<i64>,
+    pub original_tz_offset_min: Option<i64>,
+    pub original_time_text: Option<String>,
+}
+
 // ---- shared helpers ---------------------------------------------------------
 
 // The arguments mirror the case_history columns one-to-one; a params
@@ -412,6 +462,55 @@ fn get_item_tx(tx: &Transaction<'_>, id: &str) -> Result<ItemRow, WorkspaceError
         kind: "item",
         id: id.to_string(),
     })
+}
+
+fn map_marker(r: &rusqlite::Row<'_>) -> rusqlite::Result<MarkerRow> {
+    Ok(MarkerRow {
+        marker_id: r.get(0)?,
+        investigation_id: r.get(1)?,
+        kind: r.get(2)?,
+        label: r.get(3)?,
+        description: r.get(4)?,
+        at_nanos: r.get(5)?,
+        end_nanos: r.get(6)?,
+        original_tz_offset_min: r.get(7)?,
+        original_time_text: r.get(8)?,
+        position: r.get(9)?,
+        archived: r.get::<_, i64>(10)? != 0,
+        created_at: r.get(11)?,
+        updated_at: r.get(12)?,
+        revision: r.get(13)?,
+    })
+}
+
+const MARKER_COLS: &str = "marker_id, investigation_id, kind, label, description, at_nanos, \
+     end_nanos, original_tz_offset_min, original_time_text, position, archived, created_at, \
+     updated_at, revision";
+
+fn get_marker_tx(tx: &Transaction<'_>, id: &str) -> Result<MarkerRow, WorkspaceError> {
+    tx.query_row(
+        &format!("SELECT {MARKER_COLS} FROM timeline_markers WHERE marker_id = ?1"),
+        params![id],
+        map_marker,
+    )
+    .optional()?
+    .ok_or_else(|| WorkspaceError::MissingEntity {
+        kind: "marker",
+        id: id.to_string(),
+    })
+}
+
+/// A bounded marker interval must have a start, and must end after it.
+fn check_marker_bounds(at: Option<i64>, end: Option<i64>) -> Result<(), WorkspaceError> {
+    match (at, end) {
+        (None, Some(_)) => Err(WorkspaceError::Invalid(
+            "a marker interval end requires a start instant".into(),
+        )),
+        (Some(a), Some(e)) if e <= a => Err(WorkspaceError::Invalid(
+            "a marker interval must end after it starts (end is exclusive)".into(),
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn next_position(
@@ -1165,6 +1264,157 @@ impl MetaDb {
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params![investigation_id], map_item)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    // ---- timeline markers -----------------------------------------------------
+
+    pub fn create_marker(&self, new: &NewMarker) -> Result<MarkerRow, WorkspaceError> {
+        check_marker_bounds(new.at_nanos, new.end_nanos)?;
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let position = next_position(&tx, "timeline_markers", &new.investigation_id)?;
+        let ts = now();
+        tx.execute(
+            "INSERT INTO timeline_markers
+               (marker_id, investigation_id, kind, label, description, at_nanos,
+                end_nanos, original_tz_offset_min, original_time_text, position,
+                archived, created_at, updated_at, revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, ?11, 1)",
+            params![
+                new.marker_id,
+                new.investigation_id,
+                new.kind,
+                new.label,
+                new.description,
+                new.at_nanos,
+                new.end_nanos,
+                new.original_tz_offset_min,
+                new.original_time_text,
+                position,
+                ts,
+            ],
+        )?;
+        let row = get_marker_tx(&tx, &new.marker_id)?;
+        record_history(
+            &tx,
+            Some(&new.investigation_id),
+            "marker",
+            &new.marker_id,
+            1,
+            "created",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn update_marker(&self, edit: &MarkerEdit) -> Result<MarkerRow, WorkspaceError> {
+        check_marker_bounds(edit.at_nanos, edit.end_nanos)?;
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE timeline_markers SET kind = ?1, label = ?2, description = ?3,
+                at_nanos = ?4, end_nanos = ?5, original_tz_offset_min = ?6,
+                original_time_text = ?7, updated_at = ?8, revision = revision + 1
+             WHERE marker_id = ?9 AND revision = ?10",
+            params![
+                edit.kind,
+                edit.label,
+                edit.description,
+                edit.at_nanos,
+                edit.end_nanos,
+                edit.original_tz_offset_min,
+                edit.original_time_text,
+                now(),
+                edit.marker_id,
+                edit.expected_revision,
+            ],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "timeline_markers",
+                "marker_id",
+                "marker",
+                &edit.marker_id,
+                edit.expected_revision,
+            ));
+        }
+        let row = get_marker_tx(&tx, &edit.marker_id)?;
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "marker",
+            &edit.marker_id,
+            row.revision,
+            "edited",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn set_marker_archived(
+        &self,
+        id: &str,
+        expected_revision: i64,
+        archived: bool,
+    ) -> Result<MarkerRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE timeline_markers SET archived = ?1, updated_at = ?2,
+                revision = revision + 1
+             WHERE marker_id = ?3 AND revision = ?4",
+            params![archived as i64, now(), id, expected_revision],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "timeline_markers",
+                "marker_id",
+                "marker",
+                id,
+                expected_revision,
+            ));
+        }
+        let row = get_marker_tx(&tx, id)?;
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "marker",
+            id,
+            row.revision,
+            if archived { "archived" } else { "restored" },
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn list_markers(
+        &self,
+        investigation_id: &str,
+        include_archived: bool,
+    ) -> Result<Vec<MarkerRow>, WorkspaceError> {
+        let conn = self.raw();
+        let sql = format!(
+            "SELECT {MARKER_COLS} FROM timeline_markers WHERE investigation_id = ?1 {}
+             ORDER BY position, created_at",
+            if include_archived {
+                ""
+            } else {
+                "AND archived = 0"
+            }
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params![investigation_id], map_marker)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }

@@ -402,7 +402,11 @@ fn main() {
             case_cmds::pin_interval,
             case_cmds::pin_item,
             case_cmds::start_verify_evidence,
-            case_cmds::evidence_restore_context
+            case_cmds::evidence_restore_context,
+            case_cmds::create_marker,
+            case_cmds::update_marker,
+            case_cmds::set_marker_archived,
+            case_cmds::investigation_timeline
         ])
         .run(tauri::generate_context!())
         .expect("error while running LogScope");
