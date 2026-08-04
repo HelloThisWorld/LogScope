@@ -18,7 +18,7 @@
 //!   Scope refs — plain pointers — may be removed, with their final
 //!   payload retained in history.
 
-use rusqlite::{params, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::error::WorkspaceError;
@@ -285,6 +285,68 @@ pub struct MarkerEdit {
     pub original_time_text: Option<String>,
 }
 
+/// Report definition: which sections, which evidence at which exact
+/// revisions, and rendering options. Narrative content is user-authored
+/// on the definition itself — generation never synthesizes text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportDefRow {
+    pub report_def_id: String,
+    pub investigation_id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub sections_json: String,
+    pub selected_evidence_json: String,
+    pub selected_markers_json: String,
+    pub redaction_profile_id: Option<String>,
+    pub options_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewReportDef {
+    pub report_def_id: String,
+    pub investigation_id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub sections_json: String,
+    pub selected_evidence_json: String,
+    pub selected_markers_json: String,
+    pub options_json: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReportDefEdit {
+    pub report_def_id: String,
+    pub expected_revision: i64,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub sections_json: String,
+    pub selected_evidence_json: String,
+    pub selected_markers_json: String,
+    pub options_json: String,
+}
+
+/// Immutable generation record. A row is inserted `running` before any
+/// byte is written and finished exactly once; a crash leaves the
+/// `running` tombstone as honest evidence of the interrupted attempt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportArtifactRow {
+    pub artifact_id: String,
+    pub report_def_id: String,
+    pub investigation_id: String,
+    pub format: String,
+    pub destination_path: String,
+    pub snapshot_json: String,
+    pub checksum_sha256: Option<String>,
+    pub byte_size: Option<i64>,
+    pub status: String,
+    pub error_json: Option<String>,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
 // ---- shared helpers ---------------------------------------------------------
 
 // The arguments mirror the case_history columns one-to-one; a params
@@ -496,6 +558,75 @@ fn get_marker_tx(tx: &Transaction<'_>, id: &str) -> Result<MarkerRow, WorkspaceE
     .optional()?
     .ok_or_else(|| WorkspaceError::MissingEntity {
         kind: "marker",
+        id: id.to_string(),
+    })
+}
+
+fn map_report_def(r: &rusqlite::Row<'_>) -> rusqlite::Result<ReportDefRow> {
+    Ok(ReportDefRow {
+        report_def_id: r.get(0)?,
+        investigation_id: r.get(1)?,
+        title: r.get(2)?,
+        subtitle: r.get(3)?,
+        sections_json: r.get(4)?,
+        selected_evidence_json: r.get(5)?,
+        selected_markers_json: r.get(6)?,
+        redaction_profile_id: r.get(7)?,
+        options_json: r.get(8)?,
+        created_at: r.get(9)?,
+        updated_at: r.get(10)?,
+        revision: r.get(11)?,
+    })
+}
+
+const REPORT_DEF_COLS: &str = "report_def_id, investigation_id, title, subtitle, sections_json, \
+     selected_evidence_json, selected_markers_json, redaction_profile_id, options_json, \
+     created_at, updated_at, revision";
+
+fn get_report_def_tx(tx: &Transaction<'_>, id: &str) -> Result<ReportDefRow, WorkspaceError> {
+    tx.query_row(
+        &format!("SELECT {REPORT_DEF_COLS} FROM report_definitions WHERE report_def_id = ?1"),
+        params![id],
+        map_report_def,
+    )
+    .optional()?
+    .ok_or_else(|| WorkspaceError::MissingEntity {
+        kind: "report_def",
+        id: id.to_string(),
+    })
+}
+
+fn map_artifact(r: &rusqlite::Row<'_>) -> rusqlite::Result<ReportArtifactRow> {
+    Ok(ReportArtifactRow {
+        artifact_id: r.get(0)?,
+        report_def_id: r.get(1)?,
+        investigation_id: r.get(2)?,
+        format: r.get(3)?,
+        destination_path: r.get(4)?,
+        snapshot_json: r.get(5)?,
+        checksum_sha256: r.get(6)?,
+        byte_size: r.get(7)?,
+        status: r.get(8)?,
+        error_json: r.get(9)?,
+        created_at: r.get(10)?,
+        finished_at: r.get(11)?,
+    })
+}
+
+const ARTIFACT_COLS: &str = "artifact_id, report_def_id, investigation_id, format, \
+     destination_path, snapshot_json, checksum_sha256, byte_size, status, error_json, \
+     created_at, finished_at";
+
+/// Artifact fetch on an already-held connection (see `raw()` reentrancy).
+fn get_artifact_conn(conn: &Connection, id: &str) -> Result<ReportArtifactRow, WorkspaceError> {
+    conn.query_row(
+        &format!("SELECT {ARTIFACT_COLS} FROM report_artifacts WHERE artifact_id = ?1"),
+        params![id],
+        map_artifact,
+    )
+    .optional()?
+    .ok_or_else(|| WorkspaceError::MissingEntity {
+        kind: "report_artifact",
         id: id.to_string(),
     })
 }
@@ -1415,6 +1546,217 @@ impl MetaDb {
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params![investigation_id], map_marker)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    // ---- report definitions + artifacts ---------------------------------------
+
+    pub fn create_report_def(&self, new: &NewReportDef) -> Result<ReportDefRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let ts = now();
+        tx.execute(
+            "INSERT INTO report_definitions
+               (report_def_id, investigation_id, title, subtitle, sections_json,
+                selected_evidence_json, selected_markers_json, redaction_profile_id,
+                options_json, created_at, updated_at, revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, ?9, 1)",
+            params![
+                new.report_def_id,
+                new.investigation_id,
+                new.title,
+                new.subtitle,
+                new.sections_json,
+                new.selected_evidence_json,
+                new.selected_markers_json,
+                new.options_json,
+                ts,
+            ],
+        )?;
+        let row = get_report_def_tx(&tx, &new.report_def_id)?;
+        record_history(
+            &tx,
+            Some(&new.investigation_id),
+            "report_def",
+            &new.report_def_id,
+            1,
+            "created",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn update_report_def(&self, edit: &ReportDefEdit) -> Result<ReportDefRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE report_definitions SET title = ?1, subtitle = ?2, sections_json = ?3,
+                selected_evidence_json = ?4, selected_markers_json = ?5, options_json = ?6,
+                updated_at = ?7, revision = revision + 1
+             WHERE report_def_id = ?8 AND revision = ?9",
+            params![
+                edit.title,
+                edit.subtitle,
+                edit.sections_json,
+                edit.selected_evidence_json,
+                edit.selected_markers_json,
+                edit.options_json,
+                now(),
+                edit.report_def_id,
+                edit.expected_revision,
+            ],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "report_definitions",
+                "report_def_id",
+                "report_def",
+                &edit.report_def_id,
+                edit.expected_revision,
+            ));
+        }
+        let row = get_report_def_tx(&tx, &edit.report_def_id)?;
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "report_def",
+            &edit.report_def_id,
+            row.revision,
+            "edited",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn get_report_def(&self, id: &str) -> Result<Option<ReportDefRow>, WorkspaceError> {
+        let conn = self.raw();
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT {REPORT_DEF_COLS} FROM report_definitions WHERE report_def_id = ?1"
+                ),
+                params![id],
+                map_report_def,
+            )
+            .optional()?)
+    }
+
+    pub fn list_report_defs(
+        &self,
+        investigation_id: &str,
+    ) -> Result<Vec<ReportDefRow>, WorkspaceError> {
+        let conn = self.raw();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {REPORT_DEF_COLS} FROM report_definitions
+             WHERE investigation_id = ?1 ORDER BY created_at, report_def_id"
+        ))?;
+        let rows = stmt
+            .query_map(params![investigation_id], map_report_def)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Inserts the immutable `running` record before any byte is written.
+    pub fn start_report_artifact(
+        &self,
+        artifact_id: &str,
+        report_def_id: &str,
+        investigation_id: &str,
+        format: &str,
+        destination_path: &str,
+        snapshot_json: &str,
+    ) -> Result<ReportArtifactRow, WorkspaceError> {
+        // One guard for the whole call: `raw()` is a non-reentrant mutex,
+        // so re-entering through another repository method would deadlock.
+        let conn = self.raw();
+        conn.execute(
+            "INSERT INTO report_artifacts
+               (artifact_id, report_def_id, investigation_id, format, destination_path,
+                snapshot_json, checksum_sha256, byte_size, status, error_json,
+                created_at, finished_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, 'running', NULL, ?7, NULL)",
+            params![
+                artifact_id,
+                report_def_id,
+                investigation_id,
+                format,
+                destination_path,
+                snapshot_json,
+                now(),
+            ],
+        )?;
+        get_artifact_conn(&conn, artifact_id)
+    }
+
+    /// Finishes a generation record exactly once. Refuses to finish a row
+    /// that is not `running`, so an artifact's outcome can never be
+    /// rewritten after the fact.
+    pub fn finish_report_artifact(
+        &self,
+        artifact_id: &str,
+        status: &str,
+        checksum_sha256: Option<&str>,
+        byte_size: Option<i64>,
+        error_json: Option<&str>,
+    ) -> Result<ReportArtifactRow, WorkspaceError> {
+        if !matches!(status, "completed" | "failed" | "cancelled") {
+            return Err(WorkspaceError::Invalid(format!(
+                "invalid terminal artifact status {status:?}"
+            )));
+        }
+        let conn = self.raw();
+        let n = conn.execute(
+            "UPDATE report_artifacts SET status = ?1, checksum_sha256 = ?2,
+                byte_size = ?3, error_json = ?4, finished_at = ?5
+             WHERE artifact_id = ?6 AND status = 'running'",
+            params![
+                status,
+                checksum_sha256,
+                byte_size,
+                error_json,
+                now(),
+                artifact_id
+            ],
+        )?;
+        if n == 0 {
+            return Err(WorkspaceError::Invalid(format!(
+                "artifact {artifact_id} is not running (already finished or unknown)"
+            )));
+        }
+        get_artifact_conn(&conn, artifact_id)
+    }
+
+    pub fn get_report_artifact(
+        &self,
+        id: &str,
+    ) -> Result<Option<ReportArtifactRow>, WorkspaceError> {
+        let conn = self.raw();
+        Ok(conn
+            .query_row(
+                &format!("SELECT {ARTIFACT_COLS} FROM report_artifacts WHERE artifact_id = ?1"),
+                params![id],
+                map_artifact,
+            )
+            .optional()?)
+    }
+
+    pub fn list_report_artifacts(
+        &self,
+        investigation_id: &str,
+    ) -> Result<Vec<ReportArtifactRow>, WorkspaceError> {
+        let conn = self.raw();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {ARTIFACT_COLS} FROM report_artifacts
+             WHERE investigation_id = ?1 ORDER BY created_at DESC, artifact_id"
+        ))?;
+        let rows = stmt
+            .query_map(params![investigation_id], map_artifact)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }

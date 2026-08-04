@@ -6,14 +6,18 @@
 
 use std::sync::Arc;
 
+use std::path::PathBuf;
+
 use logscope_app::case;
 use logscope_app::dto::*;
+use logscope_app::report::{self, ReportFormat};
 use logscope_app::timeline;
 use logscope_case::envelope::{self, DecodeOutcome, EvidenceReference};
 use logscope_jobs::JobEvent;
 use logscope_workspace::{
     EvidenceGroupRow, EvidenceRow, HistoryRow, HypothesisRow, InvestigationEdit, InvestigationRow,
-    ItemRow, MarkerEdit, MarkerRow, NewHypothesis, NewInvestigation, NewItem, NewMarker, Workspace,
+    ItemRow, MarkerEdit, MarkerRow, NewHypothesis, NewInvestigation, NewItem, NewMarker,
+    NewReportDef, ReportArtifactRow, ReportDefEdit, ReportDefRow, Workspace,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -919,6 +923,143 @@ fn report_dto(r: case::VerificationReport) -> VerificationReportDto {
             .collect(),
         duration_ms: r.duration_ms as i64,
     }
+}
+
+// ---- reports ------------------------------------------------------------
+
+fn report_def_dto(row: ReportDefRow) -> CmdResult<ReportDefDto> {
+    let sections: Vec<SectionDto> = serde_json::from_str(&row.sections_json)
+        .map_err(|e| err("report/invalid-definition", e))?;
+    let selected_evidence: Vec<SelectedRefDto> = serde_json::from_str(&row.selected_evidence_json)
+        .map_err(|e| err("report/invalid-definition", e))?;
+    let selected_markers: Vec<SelectedRefDto> = serde_json::from_str(&row.selected_markers_json)
+        .map_err(|e| err("report/invalid-definition", e))?;
+    Ok(ReportDefDto {
+        report_def_id: row.report_def_id,
+        investigation_id: row.investigation_id,
+        title: row.title,
+        subtitle: row.subtitle,
+        sections,
+        selected_evidence,
+        selected_markers,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        revision: row.revision,
+    })
+}
+
+fn artifact_dto(row: ReportArtifactRow) -> ReportArtifactDto {
+    ReportArtifactDto {
+        artifact_id: row.artifact_id,
+        report_def_id: row.report_def_id,
+        format: row.format,
+        destination_path: row.destination_path,
+        checksum_sha256: row.checksum_sha256,
+        byte_size: row.byte_size,
+        status: row.status,
+        error_json: row.error_json,
+        created_at: row.created_at,
+        finished_at: row.finished_at,
+    }
+}
+
+/// Serializes and fail-fast-validates the sections list.
+fn sections_json_of(sections: &[SectionDto]) -> CmdResult<String> {
+    let json = serde_json::to_string(sections).map_err(|e| err("report/invalid-definition", e))?;
+    report::parse_sections(&json).map_err(|e| jerr(&e))?;
+    Ok(json)
+}
+
+fn refs_json_of(refs: &[SelectedRefDto]) -> CmdResult<String> {
+    serde_json::to_string(refs).map_err(|e| err("report/invalid-definition", e))
+}
+
+#[tauri::command]
+pub fn create_report_def(
+    state: State<'_, AppState>,
+    request: NewReportDefDto,
+) -> CmdResult<ReportDefDto> {
+    let ws = ws_handle(&state)?;
+    let new = NewReportDef {
+        report_def_id: format!("rep-{}", uuid::Uuid::new_v4()),
+        investigation_id: request.investigation_id,
+        title: request.title,
+        subtitle: request.subtitle,
+        sections_json: sections_json_of(&request.sections)?,
+        selected_evidence_json: refs_json_of(&request.selected_evidence)?,
+        selected_markers_json: refs_json_of(&request.selected_markers)?,
+        options_json: "{}".into(),
+    };
+    let row = ws.meta.create_report_def(&new).map_err(ws_err)?;
+    report_def_dto(row)
+}
+
+#[tauri::command]
+pub fn update_report_def(
+    state: State<'_, AppState>,
+    request: ReportDefEditDto,
+) -> CmdResult<ReportDefDto> {
+    let ws = ws_handle(&state)?;
+    let edit = ReportDefEdit {
+        report_def_id: request.report_def_id,
+        expected_revision: request.expected_revision,
+        title: request.title,
+        subtitle: request.subtitle,
+        sections_json: sections_json_of(&request.sections)?,
+        selected_evidence_json: refs_json_of(&request.selected_evidence)?,
+        selected_markers_json: refs_json_of(&request.selected_markers)?,
+        options_json: "{}".into(),
+    };
+    let row = ws.meta.update_report_def(&edit).map_err(ws_err)?;
+    report_def_dto(row)
+}
+
+#[tauri::command]
+pub fn list_report_defs(
+    state: State<'_, AppState>,
+    investigation_id: String,
+) -> CmdResult<Vec<ReportDefDto>> {
+    let ws = ws_handle(&state)?;
+    ws.meta
+        .list_report_defs(&investigation_id)
+        .map_err(ws_err)?
+        .into_iter()
+        .map(report_def_dto)
+        .collect()
+}
+
+#[tauri::command]
+pub fn generate_report(
+    state: State<'_, AppState>,
+    report_def_id: String,
+    format: String,
+    destination: String,
+) -> CmdResult<ReportArtifactDto> {
+    let ws = ws_handle(&state)?;
+    let fmt = ReportFormat::parse(&format).ok_or_else(|| {
+        err(
+            "report/invalid-format",
+            format!("unknown format {format:?}"),
+        )
+    })?;
+    report::generate_report(&ws, &report_def_id, fmt, &PathBuf::from(destination))
+        .map(artifact_dto)
+        .map_err(|e| jerr(&e))
+}
+
+#[tauri::command]
+pub fn list_report_artifacts(
+    state: State<'_, AppState>,
+    investigation_id: String,
+) -> CmdResult<Vec<ReportArtifactDto>> {
+    let ws = ws_handle(&state)?;
+    Ok(ws
+        .meta
+        .list_report_artifacts(&investigation_id)
+        .map_err(ws_err)?
+        .into_iter()
+        .map(artifact_dto)
+        .collect())
 }
 
 // ---- jump-back ----------------------------------------------------------

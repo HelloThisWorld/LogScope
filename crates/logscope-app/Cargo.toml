@@ -27,6 +27,7 @@ flate2.workspace = true
 crossbeam-channel.workspace = true
 ts-rs = { version = "12.0.1", features = ["chrono-impl"] }
 blake3.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -55,6 +55,12 @@ import type { NewMarkerDto } from "./bindings/NewMarkerDto";
 import type { MarkerEditDto } from "./bindings/MarkerEditDto";
 import type { TimelineDto } from "./bindings/TimelineDto";
 import type { TimelineEntryDto } from "./bindings/TimelineEntryDto";
+import type { SectionDto } from "./bindings/SectionDto";
+import type { SelectedRefDto } from "./bindings/SelectedRefDto";
+import type { ReportDefDto } from "./bindings/ReportDefDto";
+import type { NewReportDefDto } from "./bindings/NewReportDefDto";
+import type { ReportDefEditDto } from "./bindings/ReportDefEditDto";
+import type { ReportArtifactDto } from "./bindings/ReportArtifactDto";
 
 export type {
   WorkspaceInfoDto,
@@ -105,7 +111,37 @@ export type {
   MarkerEditDto,
   TimelineDto,
   TimelineEntryDto,
+  SectionDto,
+  SelectedRefDto,
+  ReportDefDto,
+  NewReportDefDto,
+  ReportDefEditDto,
+  ReportArtifactDto,
 };
+
+/// Section vocabulary in canonical order (mirrors report::SECTION_KINDS).
+export const REPORT_SECTION_KINDS = [
+  "summary",
+  "impact",
+  "symptoms",
+  "timeline",
+  "hypotheses",
+  "evidence",
+  "root_cause",
+  "resolution",
+  "validation",
+  "follow_up",
+] as const;
+
+export const NARRATIVE_SECTION_KINDS = [
+  "summary",
+  "impact",
+  "symptoms",
+  "root_cause",
+  "resolution",
+  "validation",
+  "follow_up",
+] as const;
 
 export const MARKER_KINDS = [
   "deployment",
@@ -421,4 +457,23 @@ export const api = {
     }),
   investigationTimeline: (investigationId: string) =>
     invoke<TimelineDto>("investigation_timeline", { investigationId }),
+
+  createReportDef: (request: NewReportDefDto) =>
+    invoke<ReportDefDto>("create_report_def", { request }),
+  updateReportDef: (request: ReportDefEditDto) =>
+    invoke<ReportDefDto>("update_report_def", { request }),
+  listReportDefs: (investigationId: string) =>
+    invoke<ReportDefDto[]>("list_report_defs", { investigationId }),
+  generateReport: (
+    reportDefId: string,
+    format: "markdown" | "html",
+    destination: string,
+  ) =>
+    invoke<ReportArtifactDto>("generate_report", {
+      reportDefId,
+      format,
+      destination,
+    }),
+  listReportArtifacts: (investigationId: string) =>
+    invoke<ReportArtifactDto[]>("list_report_artifacts", { investigationId }),
 };

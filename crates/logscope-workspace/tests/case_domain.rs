@@ -794,3 +794,109 @@ fn marker_crud_history_and_conflicts() {
     assert_eq!(listed[0].marker_id, "mark-2");
     assert_eq!(listed[1].marker_id, "mark-1");
 }
+
+// ---- report definitions + artifacts ----------------------------------------
+
+#[test]
+fn report_defs_are_versioned_and_artifacts_finish_exactly_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MetaDb::open(&dir.path().join("workspace.db")).unwrap();
+    db.create_investigation(&new_inv("inv-r", "Reports"))
+        .unwrap();
+
+    let def = db
+        .create_report_def(&logscope_workspace::NewReportDef {
+            report_def_id: "rep-1".into(),
+            investigation_id: "inv-r".into(),
+            title: "Checkout incident".into(),
+            subtitle: None,
+            sections_json: r#"[{"kind":"summary","content":"typed"}]"#.into(),
+            selected_evidence_json: "[]".into(),
+            selected_markers_json: "[]".into(),
+            options_json: "{}".into(),
+        })
+        .unwrap();
+    assert_eq!(def.revision, 1);
+
+    // Revision-guarded edit; stale edit conflicts.
+    let edited = db
+        .update_report_def(&logscope_workspace::ReportDefEdit {
+            report_def_id: "rep-1".into(),
+            expected_revision: 1,
+            title: "Checkout incident (final)".into(),
+            subtitle: Some("postmortem".into()),
+            sections_json: r#"[{"kind":"summary","content":"typed"},{"kind":"root_cause","content":"unknown"}]"#.into(),
+            selected_evidence_json: r#"[{"evidence_id":"evd-x","revision":3}]"#.into(),
+            selected_markers_json: "[]".into(),
+            options_json: "{}".into(),
+        })
+        .unwrap();
+    assert_eq!(edited.revision, 2);
+    assert!(matches!(
+        db.update_report_def(&logscope_workspace::ReportDefEdit {
+            report_def_id: "rep-1".into(),
+            expected_revision: 1,
+            title: "x".into(),
+            subtitle: None,
+            sections_json: "[]".into(),
+            selected_evidence_json: "[]".into(),
+            selected_markers_json: "[]".into(),
+            options_json: "{}".into(),
+        }),
+        Err(WorkspaceError::StaleRevision { .. })
+    ));
+    // History recorded for the definition.
+    let actions: Vec<String> = db
+        .list_entity_history("report_def", "rep-1")
+        .unwrap()
+        .iter()
+        .map(|h| h.action.clone())
+        .collect();
+    assert_eq!(actions, ["created", "edited"]);
+
+    // Artifact lifecycle: running -> completed, exactly once.
+    let art = db
+        .start_report_artifact(
+            "art-1",
+            "rep-1",
+            "inv-r",
+            "markdown",
+            "C:/out/report.md",
+            "{}",
+        )
+        .unwrap();
+    assert_eq!(art.status, "running");
+    assert_eq!(art.checksum_sha256, None);
+    let digest = "ab".repeat(32);
+    let done = db
+        .finish_report_artifact("art-1", "completed", Some(&digest), Some(1234), None)
+        .unwrap();
+    assert_eq!(done.status, "completed");
+    assert_eq!(done.byte_size, Some(1234));
+    assert!(done.finished_at.is_some());
+    // A finished artifact can never be finished again (immutable outcome).
+    assert!(matches!(
+        db.finish_report_artifact("art-1", "failed", None, None, None),
+        Err(WorkspaceError::Invalid(_))
+    ));
+    // Unknown terminal status refused.
+    let art2 = db
+        .start_report_artifact(
+            "art-2",
+            "rep-1",
+            "inv-r",
+            "html",
+            "C:/out/report.html",
+            "{}",
+        )
+        .unwrap();
+    assert!(matches!(
+        db.finish_report_artifact(&art2.artifact_id, "done", None, None, None),
+        Err(WorkspaceError::Invalid(_))
+    ));
+    db.finish_report_artifact(&art2.artifact_id, "cancelled", None, None, None)
+        .unwrap();
+
+    let listed = db.list_report_artifacts("inv-r").unwrap();
+    assert_eq!(listed.len(), 2);
+}
