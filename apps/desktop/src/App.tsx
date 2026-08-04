@@ -233,6 +233,46 @@ export default function App() {
             <button onClick={doCreate}>Create</button>
             <button onClick={() => doOpen()}>Open…</button>
           </div>
+          <div className="row">
+            <button
+              onClick={() =>
+                guard(async () => {
+                  const bundlePath = (await openDialog({
+                    title: "Select a .logscope-case bundle",
+                    filters: [
+                      { name: "LogScope case", extensions: ["logscope-case"] },
+                    ],
+                  })) as string | null;
+                  if (!bundlePath) return;
+                  const dest = (await saveDialog({
+                    title: "Choose a NEW folder for the imported workspace",
+                  })) as string | null;
+                  if (!dest) return;
+                  const summary = await api.importCaseBundle(
+                    bundlePath,
+                    dest,
+                    "imported case",
+                  );
+                  setStatus(
+                    `bundle imported into a new isolated workspace: ` +
+                      `${summary.evidence} evidence, ${summary.hypotheses} hypotheses, ` +
+                      `${summary.markers} markers, ${summary.reports} report file(s)` +
+                      `${summary.data_included ? ", data subset included (not registered as a dataset)" : ""}. ` +
+                      `Bundled reports are saved as files and never opened automatically.`,
+                  );
+                  const info = await api.openWorkspace(summary.workspace_root);
+                  setWorkspace(info);
+                  await refreshOverview();
+                })
+              }
+            >
+              Import case bundle…
+            </button>
+            <span className="dim">
+              imports into a new isolated workspace — never into an existing
+              one
+            </span>
+          </div>
           {recent.length > 0 && (
             <div>
               <h3>Recent</h3>

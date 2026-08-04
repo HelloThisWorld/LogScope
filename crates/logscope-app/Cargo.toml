@@ -31,6 +31,8 @@ sha2.workspace = true
 # Linear-time regex engine (same as logscope-query-lang) for bounded
 # safe-regex redaction rules.
 regex = "1"
+# Case-bundle container (same crate/features as logscope-ingest).
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile.workspace = true

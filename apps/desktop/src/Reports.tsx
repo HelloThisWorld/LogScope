@@ -110,6 +110,8 @@ export default function Reports({
     title: string;
     text: string;
   } | null>(null);
+  const [bundleProfile, setBundleProfile] = useState("");
+  const [bundleReports, setBundleReports] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -425,6 +427,67 @@ export default function Reports({
           </div>
         </div>
       )}
+
+      <h4>Case bundle</h4>
+      <p className="dim">
+        Exports this investigation as a portable <code>.logscope-case</code>{" "}
+        file: metadata, evidence with snapshots, markers, referenced saved
+        searches, and (without a disclosure profile) the referenced canonical
+        records. With a profile attached, raw data is excluded entirely and
+        every remaining string passes through the projection.
+      </p>
+      <div className="row">
+        <label className="dim">
+          disclosure
+          <select
+            value={bundleProfile}
+            aria-label="Bundle disclosure profile"
+            onChange={(e) => setBundleProfile(e.target.value)}
+          >
+            <option value="">(none — verbatim, data included)</option>
+            {profiles.map((p) => (
+              <option key={p.profile_id} value={p.profile_id}>
+                {p.name} v{p.profile_version}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="dim">
+          <input
+            type="checkbox"
+            checked={bundleReports}
+            onChange={(e) => setBundleReports(e.target.checked)}
+          />
+          include generated reports
+        </label>
+        <button
+          onClick={() =>
+            void (async () => {
+              const dest = (await saveDialog({
+                title: "Export case bundle",
+                defaultPath: `${bundle.investigation.title.replace(/[^\w.-]+/g, "_")}.logscope-case`,
+                filters: [{ name: "LogScope case", extensions: ["logscope-case"] }],
+              })) as string | null;
+              if (!dest) return;
+              try {
+                const exp = await api.exportCaseBundle(
+                  invId,
+                  dest,
+                  bundleProfile || null,
+                  bundleReports,
+                );
+                setStatus(
+                  `bundle exported · scope ${exp.reproduction_scope ?? "?"} · ${exp.byte_size} bytes · sha256 ${exp.checksum_sha256?.slice(0, 16)}…`,
+                );
+              } catch (e) {
+                setStatus(errorText(e));
+              }
+            })()
+          }
+        >
+          Export bundle…
+        </button>
+      </div>
 
       <RedactionPanel onChanged={() => void load()} />
 

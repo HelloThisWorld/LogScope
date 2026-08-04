@@ -2640,6 +2640,7 @@ dependencies = [
  "tracing",
  "ts-rs",
  "uuid",
+ "zip 8.6.0",
 ]
 
 [[package]]

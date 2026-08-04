@@ -14,10 +14,10 @@ pub mod meta;
 pub mod workspace;
 
 pub use case_meta::{
-    EvidenceGroupRow, EvidenceRow, HistoryRow, HypothesisRow, InvestigationEdit, InvestigationRow,
-    ItemRow, MarkerEdit, MarkerRow, NewEvidence, NewHypothesis, NewInvestigation, NewItem,
-    NewMarker, NewReportDef, NewScopeRef, RedactionProfileRow, ReportArtifactRow, ReportDefEdit,
-    ReportDefRow, ScopeRefRow,
+    BundleExportRow, BundleImportRow, EvidenceGroupRow, EvidenceRow, HistoryRow, HypothesisRow,
+    InvestigationEdit, InvestigationRow, ItemRow, MarkerEdit, MarkerRow, NewEvidence,
+    NewHypothesis, NewInvestigation, NewItem, NewMarker, NewReportDef, NewScopeRef,
+    RedactionProfileRow, ReportArtifactRow, ReportDefEdit, ReportDefRow, ScopeRefRow,
 };
 pub use error::WorkspaceError;
 pub use explorer_meta::{
