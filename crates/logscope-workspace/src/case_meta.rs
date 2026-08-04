@@ -328,6 +328,22 @@ pub struct ReportDefEdit {
     pub options_json: String,
 }
 
+/// Disclosure profile: ordered typed rules plus posture. Applying a
+/// profile never mutates canonical data — it is an export-time
+/// projection only. `profile_version` bumps on every rule or posture
+/// change so generated artifacts can name exactly what shaped them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedactionProfileRow {
+    pub profile_id: String,
+    pub name: String,
+    pub profile_version: i64,
+    pub rules_json: String,
+    pub posture_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: i64,
+}
+
 /// Immutable generation record. A row is inserted `running` before any
 /// byte is written and finished exactly once; a crash leaves the
 /// `running` tombstone as honest evidence of the interrupted attempt.
@@ -627,6 +643,38 @@ fn get_artifact_conn(conn: &Connection, id: &str) -> Result<ReportArtifactRow, W
     .optional()?
     .ok_or_else(|| WorkspaceError::MissingEntity {
         kind: "report_artifact",
+        id: id.to_string(),
+    })
+}
+
+fn map_redaction_profile(r: &rusqlite::Row<'_>) -> rusqlite::Result<RedactionProfileRow> {
+    Ok(RedactionProfileRow {
+        profile_id: r.get(0)?,
+        name: r.get(1)?,
+        profile_version: r.get(2)?,
+        rules_json: r.get(3)?,
+        posture_json: r.get(4)?,
+        created_at: r.get(5)?,
+        updated_at: r.get(6)?,
+        revision: r.get(7)?,
+    })
+}
+
+const REDACTION_COLS: &str = "profile_id, name, profile_version, rules_json, posture_json, \
+     created_at, updated_at, revision";
+
+fn get_redaction_profile_tx(
+    tx: &Transaction<'_>,
+    id: &str,
+) -> Result<RedactionProfileRow, WorkspaceError> {
+    tx.query_row(
+        &format!("SELECT {REDACTION_COLS} FROM redaction_profiles WHERE profile_id = ?1"),
+        params![id],
+        map_redaction_profile,
+    )
+    .optional()?
+    .ok_or_else(|| WorkspaceError::MissingEntity {
+        kind: "redaction_profile",
         id: id.to_string(),
     })
 }
@@ -1548,6 +1596,167 @@ impl MetaDb {
             .query_map(params![investigation_id], map_marker)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    // ---- redaction profiles ----------------------------------------------------
+
+    pub fn create_redaction_profile(
+        &self,
+        profile_id: &str,
+        name: &str,
+        rules_json: &str,
+        posture_json: &str,
+    ) -> Result<RedactionProfileRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let ts = now();
+        tx.execute(
+            "INSERT INTO redaction_profiles
+               (profile_id, name, profile_version, rules_json, posture_json,
+                created_at, updated_at, revision)
+             VALUES (?1, ?2, 1, ?3, ?4, ?5, ?5, 1)",
+            params![profile_id, name, rules_json, posture_json, ts],
+        )?;
+        let row = get_redaction_profile_tx(&tx, profile_id)?;
+        record_history(
+            &tx,
+            None,
+            "redaction_profile",
+            profile_id,
+            1,
+            "created",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    /// Any rule or posture change bumps `profile_version`, so artifacts
+    /// generated before and after can never claim the same profile
+    /// identity. A pure rename keeps the version.
+    pub fn update_redaction_profile(
+        &self,
+        profile_id: &str,
+        expected_revision: i64,
+        name: &str,
+        rules_json: &str,
+        posture_json: &str,
+    ) -> Result<RedactionProfileRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let semantic_change: bool = tx
+            .query_row(
+                "SELECT rules_json != ?1 OR posture_json != ?2
+                 FROM redaction_profiles WHERE profile_id = ?3",
+                params![rules_json, posture_json, profile_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        let n = tx.execute(
+            "UPDATE redaction_profiles SET name = ?1, rules_json = ?2, posture_json = ?3,
+                profile_version = profile_version + ?4, updated_at = ?5,
+                revision = revision + 1
+             WHERE profile_id = ?6 AND revision = ?7",
+            params![
+                name,
+                rules_json,
+                posture_json,
+                i64::from(semantic_change),
+                now(),
+                profile_id,
+                expected_revision,
+            ],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "redaction_profiles",
+                "profile_id",
+                "redaction_profile",
+                profile_id,
+                expected_revision,
+            ));
+        }
+        let row = get_redaction_profile_tx(&tx, profile_id)?;
+        record_history(
+            &tx,
+            None,
+            "redaction_profile",
+            profile_id,
+            row.revision,
+            "edited",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
+    }
+
+    pub fn get_redaction_profile(
+        &self,
+        id: &str,
+    ) -> Result<Option<RedactionProfileRow>, WorkspaceError> {
+        let conn = self.raw();
+        Ok(conn
+            .query_row(
+                &format!("SELECT {REDACTION_COLS} FROM redaction_profiles WHERE profile_id = ?1"),
+                params![id],
+                map_redaction_profile,
+            )
+            .optional()?)
+    }
+
+    pub fn list_redaction_profiles(&self) -> Result<Vec<RedactionProfileRow>, WorkspaceError> {
+        let conn = self.raw();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {REDACTION_COLS} FROM redaction_profiles ORDER BY name, profile_id"
+        ))?;
+        let rows = stmt
+            .query_map([], map_redaction_profile)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Attaches or detaches a disclosure profile on a report definition.
+    pub fn set_report_def_redaction(
+        &self,
+        report_def_id: &str,
+        expected_revision: i64,
+        profile_id: Option<&str>,
+    ) -> Result<ReportDefRow, WorkspaceError> {
+        let mut conn = self.raw();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
+            "UPDATE report_definitions SET redaction_profile_id = ?1, updated_at = ?2,
+                revision = revision + 1
+             WHERE report_def_id = ?3 AND revision = ?4",
+            params![profile_id, now(), report_def_id, expected_revision],
+        )?;
+        if n == 0 {
+            return Err(stale_or_missing(
+                &tx,
+                "report_definitions",
+                "report_def_id",
+                "report_def",
+                report_def_id,
+                expected_revision,
+            ));
+        }
+        let row = get_report_def_tx(&tx, report_def_id)?;
+        record_history(
+            &tx,
+            Some(&row.investigation_id),
+            "report_def",
+            report_def_id,
+            row.revision,
+            "redaction_changed",
+            &payload(&row)?,
+            "{}",
+        )?;
+        tx.commit()?;
+        Ok(row)
     }
 
     // ---- report definitions + artifacts ---------------------------------------

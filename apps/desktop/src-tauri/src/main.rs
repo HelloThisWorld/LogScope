@@ -411,7 +411,12 @@ fn main() {
             case_cmds::update_report_def,
             case_cmds::list_report_defs,
             case_cmds::generate_report,
-            case_cmds::list_report_artifacts
+            case_cmds::list_report_artifacts,
+            case_cmds::create_redaction_profile,
+            case_cmds::update_redaction_profile,
+            case_cmds::list_redaction_profiles,
+            case_cmds::set_report_def_redaction,
+            case_cmds::preview_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running LogScope");

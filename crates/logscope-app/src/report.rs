@@ -26,14 +26,17 @@ use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::Path;
 
+use std::cell::RefCell;
+
 use logscope_jobs::JobError;
 use logscope_workspace::{
-    EvidenceRow, HypothesisRow, InvestigationRow, MarkerRow, ReportArtifactRow, ReportDefRow,
-    Workspace,
+    EvidenceRow, HypothesisRow, InvestigationRow, MarkerRow, RedactionProfileRow,
+    ReportArtifactRow, ReportDefRow, Workspace,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::redact::{Projection, RedactionSummary};
 use crate::timeline::{evidence_entry, marker_entry, order_entries, TimelineEntry};
 
 /// Section vocabulary in canonical render order.
@@ -126,6 +129,41 @@ pub struct ReportSnapshot {
     hypotheses: Vec<HypothesisRow>,
     evidence: Vec<(SelectedRef, Capture<EvidenceRow>)>,
     markers: Vec<(SelectedRef, Capture<MarkerRow>)>,
+    /// Attached disclosure profile with its compiled projection.
+    redaction: Option<(RedactionProfileRow, Projection)>,
+}
+
+/// Threads one projection (or the identity) through a render pass and
+/// accumulates the honest application counts.
+struct Redactor<'a> {
+    projection: Option<&'a Projection>,
+    summary: RefCell<RedactionSummary>,
+}
+
+impl<'a> Redactor<'a> {
+    fn new(redaction: Option<&'a (RedactionProfileRow, Projection)>) -> Self {
+        Redactor {
+            projection: redaction.map(|(_, p)| p),
+            summary: RefCell::new(RedactionSummary::default()),
+        }
+    }
+    /// Projects user-authored / captured text (identity without profile).
+    fn t(&self, s: &str) -> String {
+        match self.projection {
+            Some(p) => p.text(s, &mut self.summary.borrow_mut()),
+            None => s.to_string(),
+        }
+    }
+    /// Projects an evidence snapshot JSON.
+    fn snap(&self, json: &str) -> String {
+        match self.projection {
+            Some(p) => p.snapshot_json(json, &mut self.summary.borrow_mut()),
+            None => json.to_string(),
+        }
+    }
+    fn summary(&self) -> RedactionSummary {
+        self.summary.borrow().clone()
+    }
 }
 
 /// Recovers an entity's state at an exact revision from the history
@@ -235,6 +273,27 @@ pub fn snapshot(ws: &Workspace, def: ReportDefRow) -> Result<ReportSnapshot, Job
         .list_hypotheses(&def.investigation_id)
         .map_err(ws_err)?;
 
+    // The attached disclosure profile is loaded and compiled up front so
+    // an invalid profile refuses generation instead of silently
+    // publishing unprojected content.
+    let redaction = match def.redaction_profile_id.as_deref() {
+        Some(pid) => {
+            let profile = ws
+                .meta
+                .get_redaction_profile(pid)
+                .map_err(ws_err)?
+                .ok_or_else(|| {
+                    JobError::new(
+                        "workspace/missing-entity",
+                        format!("redaction profile {pid} does not exist"),
+                    )
+                })?;
+            let projection = Projection::compile(&profile.rules_json, &profile.posture_json)?;
+            Some((profile, projection))
+        }
+        None => None,
+    };
+
     Ok(ReportSnapshot {
         investigation,
         def,
@@ -242,6 +301,7 @@ pub fn snapshot(ws: &Workspace, def: ReportDefRow) -> Result<ReportSnapshot, Job
         hypotheses,
         evidence,
         markers,
+        redaction,
     })
 }
 
@@ -285,6 +345,11 @@ pub fn snapshot_meta(s: &ReportSnapshot) -> String {
         "envelope_version": logscope_case::EVIDENCE_ENVELOPE_VERSION,
         "app_version": env!("CARGO_PKG_VERSION"),
         "display_timezone": "UTC",
+        "redaction_profile": s.redaction.as_ref().map(|(p, _)| serde_json::json!({
+            "profile_id": p.profile_id,
+            "name": p.name,
+            "profile_version": p.profile_version,
+        })),
     })
     .to_string()
 }
@@ -411,35 +476,33 @@ fn capture_note_md(sel: &SelectedRef, cap: &Capture<EvidenceRow>) -> Option<Stri
     }
 }
 
-/// Renders the deterministic Markdown document (UTF-8, LF only).
+/// Renders the deterministic Markdown document (UTF-8, LF only). The
+/// disclosure projection (when attached) runs over every user-authored
+/// and captured string — the body is rendered first so the disclosure
+/// header can state the final application counts.
 pub fn render_markdown(s: &ReportSnapshot) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("# {}\n", md_escape(&s.def.title)));
-    if let Some(sub) = s
+    let r = Redactor::new(s.redaction.as_ref());
+    // Header strings are projected before the body so their hits are in
+    // the same summary.
+    let title = r.t(&s.def.title);
+    let subtitle = s
         .def
         .subtitle
         .as_deref()
         .map(str::trim)
         .filter(|x| !x.is_empty())
-    {
-        out.push_str(&format!("*{}*\n", md_escape(sub)));
-    }
-    out.push('\n');
-    out.push_str(&format!(
-        "Investigation: {} (`{}`, revision {}) · status {} · report definition `{}` revision {} · times UTC\n",
-        md_escape(&s.investigation.title),
-        s.investigation.investigation_id,
-        s.investigation.revision,
-        md_escape(&s.investigation.status),
-        s.def.report_def_id,
-        s.def.revision,
-    ));
+        .map(|x| r.t(x));
+    let inv_title = r.t(&s.investigation.title);
 
+    let mut out = String::new();
     for section in &s.sections {
         out.push('\n');
         out.push_str(&format!("## {}\n\n", section_title(&section.kind)));
         match section.kind.as_str() {
-            k if NARRATIVE_KINDS.contains(&k) => md_narrative(&mut out, &section.content),
+            k if NARRATIVE_KINDS.contains(&k) => {
+                let projected = section.content.as_deref().map(|c| r.t(c));
+                md_narrative(&mut out, &projected);
+            }
             "timeline" => {
                 let (dated, undated) = selected_timeline(s);
                 if dated.is_empty() && undated.is_empty() {
@@ -450,10 +513,10 @@ pub fn render_markdown(s: &ReportSnapshot) -> String {
                         "- `{}` — [{}] {}{}\n",
                         entry_label(e),
                         md_escape(&e.detail_kind),
-                        md_escape(&e.title),
+                        md_escape(&r.t(&e.title)),
                         e.original_time_text
                             .as_deref()
-                            .map(|t| format!(" (entered: {})", md_escape(t)))
+                            .map(|t| format!(" (entered: {})", md_escape(&r.t(t))))
                             .unwrap_or_default(),
                     ));
                 }
@@ -463,7 +526,7 @@ pub fn render_markdown(s: &ReportSnapshot) -> String {
                         out.push_str(&format!(
                             "- [{}] {} — {}\n",
                             md_escape(&e.detail_kind),
-                            md_escape(&e.title),
+                            md_escape(&r.t(&e.title)),
                             md_escape(e.undated_reason.as_deref().unwrap_or("undated")),
                         ));
                     }
@@ -477,10 +540,10 @@ pub fn render_markdown(s: &ReportSnapshot) -> String {
                     out.push_str(&format!(
                         "- **{}** — {}{}\n",
                         md_escape(&h.state),
-                        md_escape(&h.statement),
+                        md_escape(&r.t(&h.statement)),
                         h.rationale
                             .as_deref()
-                            .map(|r| format!(" ({})", md_escape(r)))
+                            .map(|ra| format!(" ({})", md_escape(&r.t(ra))))
                             .unwrap_or_default(),
                     ));
                 }
@@ -502,18 +565,29 @@ pub fn render_markdown(s: &ReportSnapshot) -> String {
                         Capture::Live(ev) | Capture::FromHistory { row: ev, .. } => {
                             out.push_str(&format!(
                                 "**{}** — kind {}, integrity state `{}`\n\n",
-                                md_escape(&ev.title),
+                                md_escape(&r.t(&ev.title)),
                                 md_escape(&ev.kind),
                                 ev.resolver_state,
                             ));
                             if let Some(a) = ev.annotation.as_deref() {
-                                out.push_str(&format!("{}\n\n", md_escape(a)));
+                                out.push_str(&format!("{}\n\n", md_escape(&r.t(a))));
                             }
-                            if let Some(r) = ev.relevance.as_deref() {
-                                out.push_str(&format!("Why it matters: {}\n\n", md_escape(r)));
+                            if let Some(re) = ev.relevance.as_deref() {
+                                out.push_str(&format!(
+                                    "Why it matters: {}\n\n",
+                                    md_escape(&r.t(re))
+                                ));
                             }
-                            out.push_str("Captured snapshot (verbatim, bounded at pin time):\n\n");
-                            out.push_str(&md_fence(&pretty_json(&ev.snapshot_json)));
+                            if s.redaction.is_some() {
+                                out.push_str(
+                                    "Captured snapshot (disclosure projection applied):\n\n",
+                                );
+                            } else {
+                                out.push_str(
+                                    "Captured snapshot (verbatim, bounded at pin time):\n\n",
+                                );
+                            }
+                            out.push_str(&md_fence(&pretty_json(&r.snap(&ev.snapshot_json))));
                             out.push('\n');
                         }
                         Capture::Unavailable { .. } => {
@@ -529,13 +603,50 @@ pub fn render_markdown(s: &ReportSnapshot) -> String {
             }
         }
     }
+    let body = out;
+
+    // Assemble: header, disclosure statement (with final counts), body.
+    let mut doc = String::new();
+    doc.push_str(&format!("# {}\n", md_escape(&title)));
+    if let Some(sub) = &subtitle {
+        doc.push_str(&format!("*{}*\n", md_escape(sub)));
+    }
+    doc.push('\n');
+    doc.push_str(&format!(
+        "Investigation: {} (`{}`, revision {}) · status {} · report definition `{}` revision {} · times UTC\n",
+        md_escape(&inv_title),
+        s.investigation.investigation_id,
+        s.investigation.revision,
+        md_escape(&s.investigation.status),
+        s.def.report_def_id,
+        s.def.revision,
+    ));
+    if let Some((profile, _)) = &s.redaction {
+        let sum = r.summary();
+        doc.push_str(&format!(
+            "\n> **Disclosure profile applied:** {} (`{}` v{}). \
+             {} fields omitted, {} masked, {} text replacements, \
+             {} pseudonymized (deterministic, labeled), {} blocks truncated, \
+             {} paths redacted.\n",
+            md_escape(&profile.name),
+            profile.profile_id,
+            profile.profile_version,
+            sum.fields_omitted,
+            sum.fields_masked,
+            sum.text_replacements,
+            sum.pseudonymized,
+            sum.truncated_blocks,
+            sum.paths_redacted,
+        ));
+    }
+    doc.push_str(&body);
 
     // Deterministic single trailing newline, LF endings by construction.
-    while out.ends_with('\n') {
-        out.pop();
+    while doc.ends_with('\n') {
+        doc.pop();
     }
-    out.push('\n');
-    out
+    doc.push('\n');
+    doc
 }
 
 fn pretty_json(json: &str) -> String {
@@ -589,39 +700,25 @@ fn html_narrative(out: &mut String, content: &Option<String>) {
 /// scripts/links/frames/remote anything, restrictive CSP meta, every
 /// value context-escaped. Paths and URLs render as text, never links.
 pub fn render_html(s: &ReportSnapshot) -> String {
-    let mut b = String::new();
-    b.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
-    b.push_str(
-        "<meta http-equiv=\"Content-Security-Policy\" \
-         content=\"default-src 'none'; style-src 'unsafe-inline'\">\n",
-    );
-    b.push_str(&format!("<title>{}</title>\n", h(&s.def.title)));
-    b.push_str(&format!("<style>{REPORT_CSS}</style>\n</head>\n<body>\n"));
-    b.push_str(&format!("<h1>{}</h1>\n", h(&s.def.title)));
-    if let Some(sub) = s
+    let r = Redactor::new(s.redaction.as_ref());
+    let title = r.t(&s.def.title);
+    let subtitle = s
         .def
         .subtitle
         .as_deref()
         .map(str::trim)
         .filter(|x| !x.is_empty())
-    {
-        b.push_str(&format!("<p class=\"meta\"><em>{}</em></p>\n", h(sub)));
-    }
-    b.push_str(&format!(
-        "<p class=\"meta\">Investigation: {} (<code>{}</code>, revision {}) · status {} · \
-         report definition <code>{}</code> revision {} · times UTC</p>\n",
-        h(&s.investigation.title),
-        h(&s.investigation.investigation_id),
-        s.investigation.revision,
-        h(&s.investigation.status),
-        h(&s.def.report_def_id),
-        s.def.revision,
-    ));
+        .map(|x| r.t(x));
+    let inv_title = r.t(&s.investigation.title);
 
+    let mut b = String::new();
     for section in &s.sections {
         b.push_str(&format!("<h2>{}</h2>\n", h(&section_title(&section.kind))));
         match section.kind.as_str() {
-            k if NARRATIVE_KINDS.contains(&k) => html_narrative(&mut b, &section.content),
+            k if NARRATIVE_KINDS.contains(&k) => {
+                let projected = section.content.as_deref().map(|c| r.t(c));
+                html_narrative(&mut b, &projected);
+            }
             "timeline" => {
                 let (dated, undated) = selected_timeline(s);
                 if dated.is_empty() && undated.is_empty() {
@@ -634,12 +731,12 @@ pub fn render_html(s: &ReportSnapshot) -> String {
                             "<li><code>{}</code> — <span class=\"state\">{}</span> {}{}</li>\n",
                             h(&entry_label(e)),
                             h(&e.detail_kind),
-                            h(&e.title),
+                            h(&r.t(&e.title)),
                             e.original_time_text
                                 .as_deref()
                                 .map(|t| format!(
                                     " <span class=\"meta\">(entered: {})</span>",
-                                    h(t)
+                                    h(&r.t(t))
                                 ))
                                 .unwrap_or_default(),
                         ));
@@ -654,7 +751,7 @@ pub fn render_html(s: &ReportSnapshot) -> String {
                         b.push_str(&format!(
                             "<li><span class=\"state\">{}</span> {} — <span class=\"meta\">{}</span></li>\n",
                             h(&e.detail_kind),
-                            h(&e.title),
+                            h(&r.t(&e.title)),
                             h(e.undated_reason.as_deref().unwrap_or("undated")),
                         ));
                     }
@@ -670,10 +767,10 @@ pub fn render_html(s: &ReportSnapshot) -> String {
                         b.push_str(&format!(
                             "<li><span class=\"state\">{}</span> <strong>{}</strong>{}</li>\n",
                             h(&hy.state),
-                            h(&hy.statement),
+                            h(&r.t(&hy.statement)),
                             hy.rationale
                                 .as_deref()
-                                .map(|r| format!(" <span class=\"meta\">({})</span>", h(r)))
+                                .map(|ra| format!(" <span class=\"meta\">({})</span>", h(&r.t(ra))))
                                 .unwrap_or_default(),
                         ));
                     }
@@ -709,23 +806,30 @@ pub fn render_html(s: &ReportSnapshot) -> String {
                             b.push_str(&format!(
                                 "<p><strong>{}</strong> — kind {}, integrity state \
                                  <span class=\"state\">{}</span></p>\n",
-                                h(&ev.title),
+                                h(&r.t(&ev.title)),
                                 h(&ev.kind),
                                 h(&ev.resolver_state),
                             ));
                             if let Some(a) = ev.annotation.as_deref() {
-                                b.push_str(&format!("<p>{}</p>\n", h(a)));
+                                b.push_str(&format!("<p>{}</p>\n", h(&r.t(a))));
                             }
-                            if let Some(r) = ev.relevance.as_deref() {
-                                b.push_str(&format!("<p>Why it matters: {}</p>\n", h(r)));
+                            if let Some(re) = ev.relevance.as_deref() {
+                                b.push_str(&format!("<p>Why it matters: {}</p>\n", h(&r.t(re))));
                             }
-                            b.push_str(
-                                "<p class=\"meta\">Captured snapshot (verbatim, bounded at pin \
-                                 time):</p>\n",
-                            );
+                            if s.redaction.is_some() {
+                                b.push_str(
+                                    "<p class=\"meta\">Captured snapshot (disclosure \
+                                     projection applied):</p>\n",
+                                );
+                            } else {
+                                b.push_str(
+                                    "<p class=\"meta\">Captured snapshot (verbatim, bounded \
+                                     at pin time):</p>\n",
+                                );
+                            }
                             b.push_str(&format!(
                                 "<pre>{}</pre>\n",
-                                h(&pretty_json(&ev.snapshot_json))
+                                h(&pretty_json(&r.snap(&ev.snapshot_json)))
                             ));
                         }
                         Capture::Unavailable { .. } => {
@@ -743,8 +847,51 @@ pub fn render_html(s: &ReportSnapshot) -> String {
             }
         }
     }
-    b.push_str("</body>\n</html>\n");
-    b
+    let body = b;
+
+    let mut doc = String::new();
+    doc.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
+    doc.push_str(
+        "<meta http-equiv=\"Content-Security-Policy\" \
+         content=\"default-src 'none'; style-src 'unsafe-inline'\">\n",
+    );
+    doc.push_str(&format!("<title>{}</title>\n", h(&title)));
+    doc.push_str(&format!("<style>{REPORT_CSS}</style>\n</head>\n<body>\n"));
+    doc.push_str(&format!("<h1>{}</h1>\n", h(&title)));
+    if let Some(sub) = &subtitle {
+        doc.push_str(&format!("<p class=\"meta\"><em>{}</em></p>\n", h(sub)));
+    }
+    doc.push_str(&format!(
+        "<p class=\"meta\">Investigation: {} (<code>{}</code>, revision {}) · status {} · \
+         report definition <code>{}</code> revision {} · times UTC</p>\n",
+        h(&inv_title),
+        h(&s.investigation.investigation_id),
+        s.investigation.revision,
+        h(&s.investigation.status),
+        h(&s.def.report_def_id),
+        s.def.revision,
+    ));
+    if let Some((profile, _)) = &s.redaction {
+        let sum = r.summary();
+        doc.push_str(&format!(
+            "<div class=\"warn\"><strong>Disclosure profile applied:</strong> {} \
+             (<code>{}</code> v{}). {} fields omitted, {} masked, {} text replacements, \
+             {} pseudonymized (deterministic, labeled), {} blocks truncated, \
+             {} paths redacted.</div>\n",
+            h(&profile.name),
+            h(&profile.profile_id),
+            profile.profile_version,
+            sum.fields_omitted,
+            sum.fields_masked,
+            sum.text_replacements,
+            sum.pseudonymized,
+            sum.truncated_blocks,
+            sum.paths_redacted,
+        ));
+    }
+    doc.push_str(&body);
+    doc.push_str("</body>\n</html>\n");
+    doc
 }
 
 // ---- generation --------------------------------------------------------------
@@ -769,6 +916,37 @@ impl ReportFormat {
             _ => None,
         }
     }
+}
+
+/// One render entry point shared by preview and generation, so the two
+/// can never diverge.
+fn render_snapshot(snap: &ReportSnapshot, format: ReportFormat) -> String {
+    match format {
+        ReportFormat::Markdown => render_markdown(snap),
+        ReportFormat::Html => render_html(snap),
+    }
+}
+
+/// Renders a definition to bytes without writing anything. The preview
+/// IS the final bytes: `generate_report` calls this same path over the
+/// same inputs, and the equality is asserted by test.
+pub fn render_preview(
+    ws: &Workspace,
+    report_def_id: &str,
+    format: ReportFormat,
+) -> Result<String, JobError> {
+    let def = ws
+        .meta
+        .get_report_def(report_def_id)
+        .map_err(ws_err)?
+        .ok_or_else(|| {
+            JobError::new(
+                "workspace/missing-entity",
+                format!("report definition {report_def_id} does not exist"),
+            )
+        })?;
+    let snap = snapshot(ws, def)?;
+    Ok(render_snapshot(&snap, format))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -836,10 +1014,7 @@ pub fn generate_report(
         .map_err(ws_err)?;
 
     let result = (|| -> Result<(String, i64), JobError> {
-        let bytes = match format {
-            ReportFormat::Markdown => render_markdown(&snap),
-            ReportFormat::Html => render_html(&snap),
-        };
+        let bytes = render_snapshot(&snap, format);
         let temp = dir.join(format!(
             ".{}.partial-{}",
             destination

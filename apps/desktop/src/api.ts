@@ -61,6 +61,7 @@ import type { ReportDefDto } from "./bindings/ReportDefDto";
 import type { NewReportDefDto } from "./bindings/NewReportDefDto";
 import type { ReportDefEditDto } from "./bindings/ReportDefEditDto";
 import type { ReportArtifactDto } from "./bindings/ReportArtifactDto";
+import type { RedactionProfileDto } from "./bindings/RedactionProfileDto";
 
 export type {
   WorkspaceInfoDto,
@@ -117,6 +118,7 @@ export type {
   NewReportDefDto,
   ReportDefEditDto,
   ReportArtifactDto,
+  RedactionProfileDto,
 };
 
 /// Section vocabulary in canonical order (mirrors report::SECTION_KINDS).
@@ -476,4 +478,43 @@ export const api = {
     }),
   listReportArtifacts: (investigationId: string) =>
     invoke<ReportArtifactDto[]>("list_report_artifacts", { investigationId }),
+
+  createRedactionProfile: (
+    name: string,
+    rulesJson: string,
+    postureJson: string,
+  ) =>
+    invoke<RedactionProfileDto>("create_redaction_profile", {
+      name,
+      rulesJson,
+      postureJson,
+    }),
+  updateRedactionProfile: (
+    profileId: string,
+    expectedRevision: number,
+    name: string,
+    rulesJson: string,
+    postureJson: string,
+  ) =>
+    invoke<RedactionProfileDto>("update_redaction_profile", {
+      profileId,
+      expectedRevision,
+      name,
+      rulesJson,
+      postureJson,
+    }),
+  listRedactionProfiles: () =>
+    invoke<RedactionProfileDto[]>("list_redaction_profiles"),
+  setReportDefRedaction: (
+    reportDefId: string,
+    expectedRevision: number,
+    profileId: string | null,
+  ) =>
+    invoke<ReportDefDto>("set_report_def_redaction", {
+      reportDefId,
+      expectedRevision,
+      profileId,
+    }),
+  previewReport: (reportDefId: string, format: "markdown" | "html") =>
+    invoke<string>("preview_report", { reportDefId, format }),
 };

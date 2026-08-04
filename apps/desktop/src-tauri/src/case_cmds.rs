@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use logscope_app::case;
 use logscope_app::dto::*;
+use logscope_app::redact::Projection;
 use logscope_app::report::{self, ReportFormat};
 use logscope_app::timeline;
 use logscope_case::envelope::{self, DecodeOutcome, EvidenceReference};
@@ -17,7 +18,7 @@ use logscope_jobs::JobEvent;
 use logscope_workspace::{
     EvidenceGroupRow, EvidenceRow, HistoryRow, HypothesisRow, InvestigationEdit, InvestigationRow,
     ItemRow, MarkerEdit, MarkerRow, NewHypothesis, NewInvestigation, NewItem, NewMarker,
-    NewReportDef, ReportArtifactRow, ReportDefEdit, ReportDefRow, Workspace,
+    NewReportDef, RedactionProfileRow, ReportArtifactRow, ReportDefEdit, ReportDefRow, Workspace,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -942,6 +943,7 @@ fn report_def_dto(row: ReportDefRow) -> CmdResult<ReportDefDto> {
         sections,
         selected_evidence,
         selected_markers,
+        redaction_profile_id: row.redaction_profile_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
         revision: row.revision,
@@ -1060,6 +1062,111 @@ pub fn list_report_artifacts(
         .into_iter()
         .map(artifact_dto)
         .collect())
+}
+
+// ---- redaction profiles --------------------------------------------------
+
+fn redaction_dto(row: RedactionProfileRow) -> RedactionProfileDto {
+    RedactionProfileDto {
+        profile_id: row.profile_id,
+        name: row.name,
+        profile_version: row.profile_version,
+        rules_json: row.rules_json,
+        posture_json: row.posture_json,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        revision: row.revision,
+    }
+}
+
+#[tauri::command]
+pub fn create_redaction_profile(
+    state: State<'_, AppState>,
+    name: String,
+    rules_json: String,
+    posture_json: String,
+) -> CmdResult<RedactionProfileDto> {
+    let ws = ws_handle(&state)?;
+    // Compile-validate before storing: a profile that cannot project is
+    // never saved.
+    Projection::compile(&rules_json, &posture_json).map_err(|e| jerr(&e))?;
+    ws.meta
+        .create_redaction_profile(
+            &format!("red-{}", uuid::Uuid::new_v4()),
+            &name,
+            &rules_json,
+            &posture_json,
+        )
+        .map(redaction_dto)
+        .map_err(ws_err)
+}
+
+#[tauri::command]
+pub fn update_redaction_profile(
+    state: State<'_, AppState>,
+    profile_id: String,
+    expected_revision: i64,
+    name: String,
+    rules_json: String,
+    posture_json: String,
+) -> CmdResult<RedactionProfileDto> {
+    let ws = ws_handle(&state)?;
+    Projection::compile(&rules_json, &posture_json).map_err(|e| jerr(&e))?;
+    ws.meta
+        .update_redaction_profile(
+            &profile_id,
+            expected_revision,
+            &name,
+            &rules_json,
+            &posture_json,
+        )
+        .map(redaction_dto)
+        .map_err(ws_err)
+}
+
+#[tauri::command]
+pub fn list_redaction_profiles(state: State<'_, AppState>) -> CmdResult<Vec<RedactionProfileDto>> {
+    let ws = ws_handle(&state)?;
+    Ok(ws
+        .meta
+        .list_redaction_profiles()
+        .map_err(ws_err)?
+        .into_iter()
+        .map(redaction_dto)
+        .collect())
+}
+
+#[tauri::command]
+pub fn set_report_def_redaction(
+    state: State<'_, AppState>,
+    report_def_id: String,
+    expected_revision: i64,
+    profile_id: Option<String>,
+) -> CmdResult<ReportDefDto> {
+    let ws = ws_handle(&state)?;
+    let row = ws
+        .meta
+        .set_report_def_redaction(&report_def_id, expected_revision, profile_id.as_deref())
+        .map_err(ws_err)?;
+    report_def_dto(row)
+}
+
+/// Renders the exact final bytes without writing anything — the preview
+/// and generation share one render path Rust-side.
+#[tauri::command]
+pub fn preview_report(
+    state: State<'_, AppState>,
+    report_def_id: String,
+    format: String,
+) -> CmdResult<String> {
+    let ws = ws_handle(&state)?;
+    let fmt = ReportFormat::parse(&format).ok_or_else(|| {
+        err(
+            "report/invalid-format",
+            format!("unknown format {format:?}"),
+        )
+    })?;
+    report::render_preview(&ws, &report_def_id, fmt).map_err(|e| jerr(&e))
 }
 
 // ---- jump-back ----------------------------------------------------------
