@@ -4,8 +4,10 @@ name: CI
 # the personal macOS self-hosted runner (Apple Silicon). The Linux
 # shared-core leg also runs there, inside a linux/arm64 container, so it
 # needs no hosted minutes. The only GitHub-hosted job is the Windows
-# packaging job, which cannot run on the Mac and stays dispatch-gated
-# while the Actions billing limit blocks hosted minutes.
+# packaging job, which cannot run on the Mac. It stays dispatch-gated so
+# hosted-minute spend is always deliberate; the Actions billing limit that
+# previously blocked it is no longer in force — it ran green on
+# 2026-08-03 (run 30836709707).
 #
 # SECURITY RED LINE: a self-hosted runner must never serve a public
 # repository. If this repo is ever made public, move every job back to
@@ -28,6 +30,15 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      reset_linux_cache:
+        description: >-
+          Discard the Linux container's cached Cargo target directory and
+          crate registry before building. Use this after a cancelled or
+          interrupted run leaves the cache in a bad state; a normal run
+          should leave it off, because a cold cache costs ~90 minutes.
+        type: boolean
+        default: false
 
 # A newer push to the same branch/PR supersedes the previous run.
 concurrency:
@@ -98,6 +109,12 @@ jobs:
     name: Shared core (Linux container, arm64)
     if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, macOS]
+    # A hung or pathologically slow container must fail in a bounded time
+    # rather than hold the single self-hosted runner for GitHub's 6-hour
+    # default. A cold run (empty cache volumes) builds DuckDB from source
+    # and took ~90 minutes on run 30836709707; a warm run is a fraction of
+    # that, so this ceiling is generous even for a cache reset.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Put user toolchains and the container CLI on PATH
@@ -149,19 +166,50 @@ jobs:
             echo "Start Rancher Desktop on the runner host (or Docker Desktop / 'colima start')." >&2
             exit 1
           }
-      - name: Shared-core clippy + tests in a Linux container
-        # CARGO_TARGET_DIR is redirected inside the container so Linux
-        # build output never lands in the macOS runner's warm target dir.
+      - name: Discard the Linux build cache (only when asked)
+        # Opt-in, because a cold cache costs ~90 minutes. Exists because a
+        # cancelled run can leave a Cargo target directory that is cheaper
+        # to throw away than to diagnose.
+        if: inputs.reset_linux_cache
+        run: docker volume rm -f logscope-linux-target logscope-linux-cargo
+
+      - name: Shared-core tests in a Linux container
+        # Tests only — no clippy. The lint pass on macOS already covers
+        # every line this one would: the tree contains no `target_os =
+        # "linux"` anywhere, and its only conditionals are `windows` /
+        # `not(windows)`, so macOS and Linux compile a byte-identical
+        # `not(windows)` branch. What Linux uniquely exercises is runtime
+        # behaviour — case-sensitive filesystem, POSIX path
+        # canonicalization, encodings, line endings, timezones — and only
+        # `cargo test` exercises that. Running clippy here bought a second
+        # full check pass for no additional signal.
+        #
+        # Build state lives in two named Docker volumes rather than inside
+        # the `--rm` container, where it used to be discarded on every run.
+        # That discard is what made this leg cost ~90 minutes: the bundled
+        # DuckDB C/C++ build dominates, and it was redone from scratch
+        # every time. Volumes are on the VM's own filesystem, so they are
+        # also far faster than the bind-mounted source tree.
+        #
+        # CARGO_TARGET_DIR still points outside /work so Linux output
+        # never lands in the macOS runner's warm target directory.
+        #
+        # RUSTFLAGS is deliberately NOT forwarded: the workspace-level
+        # `-D warnings` belongs to the macOS lint job, and setting it here
+        # would invalidate this cache on every flag change while adding no
+        # signal (see the no-clippy rationale above).
         run: |
           docker run --rm \
             -v "$PWD":/work -w /work \
+            -v logscope-linux-target:/target \
+            -v logscope-linux-cargo:/usr/local/cargo/registry \
             -e CARGO_TERM_COLOR=always \
-            -e CARGO_TARGET_DIR=/tmp/target-linux \
+            -e CARGO_TARGET_DIR=/target \
+            -e CARGO_PROFILE_DEV_DEBUG=0 \
             rust:1-bookworm \
             bash -c '
               set -euo pipefail
               rustc --version && cargo --version
-              cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
               cargo test --workspace --exclude logscope-desktop
             '
 
