@@ -1,44 +1,50 @@
 name: CI
 
-# All routine CI (format, lint, full tests, desktop shell smoke) runs on
-# the personal macOS self-hosted runner (Apple Silicon). The Linux
-# shared-core leg also runs there, inside a linux/arm64 container, so it
-# needs no hosted minutes. The only GitHub-hosted job is the Windows
-# packaging job, which cannot run on the Mac. It stays dispatch-gated so
-# hosted-minute spend is always deliberate; the Actions billing limit that
-# previously blocked it is no longer in force — it ran green on
-# 2026-08-03 (run 30836709707).
+# All CI runs on GitHub-hosted runners. This repository is PUBLIC, and
+# hosted standard runners are free for public repositories.
 #
-# SECURITY RED LINE: a self-hosted runner must never serve a public
-# repository. If this repo is ever made public, move every job back to
-# GitHub-hosted runners BEFORE changing visibility — public-repo pull
-# requests would otherwise execute untrusted code on personal hardware.
+# SECURITY RED LINE (now in its public-repo form): a self-hosted runner
+# must NEVER be registered to this repository again while it is public.
+# Fork pull requests execute untrusted code; on a hosted runner that is
+# an isolated throwaway VM, on a self-hosted runner it is someone's
+# personal machine. The previous self-hosted design and its rationale
+# are preserved in the git history of this file.
 #
-# Trigger design:
+# Speed strategy — the bundled DuckDB C/C++ build dominates cold compile
+# time, so the whole design exists to compile it rarely:
+# - Per-OS Cargo caches (Swatinem/rust-cache). A warm cache skips the
+#   expensive dependency builds entirely.
+# - Caches are SAVED only by push builds of main; pull requests restore
+#   main's cache and never write their own. A cancelled PR run once
+#   saved a partial cache that exact-key-shadowed main's good one and
+#   produced 40-minute "warm" builds — PR-scope saves are how that
+#   happens, so PRs do not save.
+# - Jobs run in parallel, so wall time is the slowest job, not the sum.
+# - Every job carries timeout-minutes: a wedged job dies in bounded
+#   time, never at GitHub's 6-hour default.
+#
+# Platform matrix (shared-core gate 159): x86_64 Linux (case-sensitive
+# filesystem, POSIX path semantics), x86_64 Windows (the release
+# platform), arm64 macOS. Linux on hosted runners is real x86_64 — an
+# upgrade over the retired arm64-container leg, which had to record an
+# architecture apology.
+#
+# Triggers:
 # - pull_request: the validation path.
-# - workflow_dispatch: on-demand run; also the only way to run the
-#   Windows packaging job.
-# - No push-to-main build: an ordinary merge was already validated by
-#   its PR. No cache cron either — the self-hosted runner keeps its
-#   Cargo target directory warm on local disk between runs, so there is
-#   no hosted-cache scope to seed or refresh.
-#
-# Runner prerequisites (installed on the Mac, not by this workflow):
-# rustup with the stable toolchain (rustfmt + clippy), Xcode Command
-# Line Tools (C/C++ for the bundled DuckDB/SQLite builds), Node.js 22+.
+# - push to main: refreshes the shared caches and keeps the badge
+#   telling the truth about main.
+# - workflow_dispatch: on-demand runs; the only trigger for the Windows
+#   packaging job.
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      reset_linux_cache:
-        description: >-
-          Discard the Linux container's cached Cargo target directory and
-          crate registry before building. Use this after a cancelled or
-          interrupted run leaves the cache in a bad state; a normal run
-          should leave it off, because a cold cache costs ~90 minutes.
-        type: boolean
-        default: false
+
+# Fork PRs run with a read-only token; nothing in CI needs more.
+permissions:
+  contents: read
 
 # A newer push to the same branch/PR supersedes the previous run.
 concurrency:
@@ -53,188 +59,70 @@ env:
   CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
-  mac-ci:
-    # One serial job on the single runner: separate jobs would only add
-    # checkouts and queueing, and one job keeps one warm target dir.
-    name: Lint + tests + shell smoke (macOS self-hosted)
-    runs-on: [self-hosted, macOS]
+  linux:
+    name: Lint + shared-core tests (Linux x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Put user toolchains on PATH
-        # The runner service starts with a minimal PATH; rustup installs
-        # to ~/.cargo/bin and Homebrew (Apple Silicon) to /opt/homebrew.
-        run: |
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
-          echo "/usr/local/bin" >> "$GITHUB_PATH"
-      - name: Toolchain versions (fails fast if the Mac is missing one)
-        run: |
-          rustup show active-toolchain
-          rustc --version
-          cargo --version
-          node --version
-          npm --version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-core
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --check
       - run: cargo clippy --workspace --exclude logscope-desktop --tests -- -D warnings
+      - run: cargo test --workspace --exclude logscope-desktop
+
+  windows:
+    name: Shared-core tests + desktop shell smoke (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-core
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: cargo test --workspace --exclude logscope-desktop
       - name: Frontend build
         working-directory: apps/desktop
         run: |
           npm ci
           npm run build
-      - name: Tauri desktop shell build smoke
+      - name: Desktop shell build smoke
+        # Debug build, not check: linking is where WebView2 and the
+        # Windows toolchain break, and this is the platform we ship.
         run: cargo build -p logscope-desktop
 
-  linux-core:
-    # Shared-core semantics only: path canonicalization, encodings,
-    # timezones, line endings and file identity on a case-sensitive
-    # filesystem. The Tauri desktop shell is excluded deliberately —
-    # Linux is not a release platform and the desktop-shell build check
-    # belongs to the macOS job.
-    #
-    # Runs in a Linux container ON the self-hosted macOS runner rather than
-    # on a GitHub-hosted Linux runner, because hosted minutes are
-    # unavailable under the Actions billing limit. Apple Silicon executes
-    # linux/arm64 containers natively, so this is real Linux — not
-    # emulation — and it exercises exactly what this leg is for:
-    # case-sensitive filesystem behaviour, POSIX path canonicalization,
-    # encodings, line endings and timezone handling. It is NOT an x86_64
-    # check; the architecture difference is deliberate and recorded,
-    # because emulating amd64 would make the bundled DuckDB build
-    # impractically slow for no additional signal on these semantics.
-    #
-    # Dispatch-gated so it does not serialize behind mac-ci on every PR —
-    # there is one self-hosted runner. Move to `pull_request` if a second
-    # runner becomes available.
-    name: Shared core (Linux container, arm64)
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, macOS]
-    # A hung or pathologically slow container must fail in a bounded time
-    # rather than hold the single self-hosted runner for GitHub's 6-hour
-    # default. A cold run (empty cache volumes) builds DuckDB from source
-    # and took ~90 minutes on run 30836709707; a warm run is a fraction of
-    # that, so this ceiling is generous even for a cache reset.
-    timeout-minutes: 120
+  macos:
+    name: Shared-core tests (macOS arm64)
+    runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Put user toolchains and the container CLI on PATH
-        # The runner service starts with a minimal PATH, exactly as in the
-        # macOS job above, so the container CLI has to be named explicitly.
-        #
-        # This runner uses **Rancher Desktop**, which installs its docker
-        # CLI shim into ~/.rd/bin — not /usr/local/bin, and not a Docker
-        # Desktop app bundle. The other entries are kept so the leg also
-        # works on a host running Docker Desktop, Homebrew docker or colima.
-        run: |
-          echo "$HOME/.rd/bin" >> "$GITHUB_PATH"
-          echo "/usr/local/bin" >> "$GITHUB_PATH"
-          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.docker/bin" >> "$GITHUB_PATH"
-          echo "/Applications/Docker.app/Contents/Resources/bin" >> "$GITHUB_PATH"
-      - name: Verify Docker is available
-        # Fail fast with an actionable message rather than a confusing
-        # "command not found" halfway through the job.
-        #
-        # On failure this reports where it actually looked and what it
-        # found, so the next fix is driven by evidence from the runner
-        # instead of another guess at where Docker Desktop put its CLI.
-        run: |
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "::error::docker was not found on PATH." >&2
-            echo "--- PATH ---" >&2
-            tr ':' '\n' <<<"$PATH" >&2
-            echo "--- candidate locations ---" >&2
-            for p in "$HOME/.rd/bin/docker" \
-                     /usr/local/bin/docker \
-                     /opt/homebrew/bin/docker \
-                     "$HOME/.docker/bin/docker" \
-                     /Applications/Docker.app/Contents/Resources/bin/docker \
-                     "$HOME/Applications/Docker.app/Contents/Resources/bin/docker" \
-                     /opt/podman/bin/docker; do
-              if [ -e "$p" ]; then echo "FOUND   $p" >&2; else echo "absent  $p" >&2; fi
-            done
-            echo "--- any docker/colima/podman binary under /Applications and \$HOME ---" >&2
-            find /Applications "$HOME" -maxdepth 6 -type f \
-                 \( -name docker -o -name colima -o -name podman \) 2>/dev/null | head -20 >&2 || true
-            echo "Fix: add the directory reported above to the PATH step, or run" >&2
-            echo "'colima start'. Launching Docker Desktop once also creates its CLI links." >&2
-            exit 1
-          fi
-          echo "docker CLI: $(command -v docker)"
-          docker version --format 'server {{.Server.Version}}' || {
-            echo "::error::The docker CLI is present but its container runtime is not reachable." >&2
-            echo "Start Rancher Desktop on the runner host (or Docker Desktop / 'colima start')." >&2
-            exit 1
-          }
-      - name: Discard the Linux build cache (only when asked)
-        # Opt-in, because a cold cache costs ~90 minutes. Exists because a
-        # cancelled run can leave a Cargo target directory that is cheaper
-        # to throw away than to diagnose.
-        if: inputs.reset_linux_cache
-        run: docker volume rm -f logscope-linux-target logscope-linux-cargo
-
-      - name: Shared-core tests in a Linux container
-        # Tests only — no clippy. The lint pass on macOS already covers
-        # every line this one would: the tree contains no `target_os =
-        # "linux"` anywhere, and its only conditionals are `windows` /
-        # `not(windows)`, so macOS and Linux compile a byte-identical
-        # `not(windows)` branch. What Linux uniquely exercises is runtime
-        # behaviour — case-sensitive filesystem, POSIX path
-        # canonicalization, encodings, line endings, timezones — and only
-        # `cargo test` exercises that. Running clippy here bought a second
-        # full check pass for no additional signal.
-        #
-        # Build state lives in two named Docker volumes rather than inside
-        # the `--rm` container, where it used to be discarded on every run.
-        # That discard is what made this leg cost ~90 minutes: the bundled
-        # DuckDB C/C++ build dominates, and it was redone from scratch
-        # every time. Volumes are on the VM's own filesystem, so they are
-        # also far faster than the bind-mounted source tree.
-        #
-        # CARGO_TARGET_DIR still points outside /work so Linux output
-        # never lands in the macOS runner's warm target directory.
-        #
-        # RUSTFLAGS is deliberately NOT forwarded: the workspace-level
-        # `-D warnings` belongs to the macOS lint job, and setting it here
-        # would invalidate this cache on every flag change while adding no
-        # signal (see the no-clippy rationale above).
-        #
-        # CARGO_BUILD_JOBS=4: unbounded parallelism inside the VM starved
-        # the runner HOST. Run 30870034552 died 10 minutes into this step
-        # with the machine provably awake (pmset log shows no sleep in the
-        # death window, caffeinate held, user at the keyboard) — the
-        # loss-of-communication signature, at GitHub's ~10-minute lost-
-        # contact threshold. Leading explanation: the DuckDB C++ build at
-        # full parallelism inside Rancher Desktop's VM pushed the laptop
-        # host into memory thrash until the runner agent missed its
-        # heartbeats. Four jobs (~1-1.5 GB each at peak for the C++ units)
-        # bound peak memory while costing little wall time, since the
-        # cached volumes absorb most of the work after the first run.
-        run: |
-          docker run --rm \
-            -v "$PWD":/work -w /work \
-            -v logscope-linux-target:/target \
-            -v logscope-linux-cargo:/usr/local/cargo/registry \
-            -e CARGO_TERM_COLOR=always \
-            -e CARGO_TARGET_DIR=/target \
-            -e CARGO_PROFILE_DEV_DEBUG=0 \
-            -e CARGO_BUILD_JOBS=4 \
-            rust:1-bookworm \
-            bash -c '
-              set -euo pipefail
-              rustc --version && cargo --version
-              cargo test --workspace --exclude logscope-desktop
-            '
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos-core
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test --workspace --exclude logscope-desktop
 
   package-windows:
     # On demand only (workflow_dispatch): PR iteration does not need a
-    # cloud-built archive and release packaging is driven locally via
-    # scripts/package-portable.ps1. Stays on a hosted Windows runner —
-    # Windows artifacts cannot be produced on the macOS runner — so it
-    # requires available GitHub-hosted minutes when dispatched.
+    # cloud-built archive, and release packaging is driven locally via
+    # scripts/package-portable.ps1 (ADR-0018). The windows job above
+    # already proves the desktop shell builds on every PR.
     name: Portable ZIP (Windows, unsigned)
     if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

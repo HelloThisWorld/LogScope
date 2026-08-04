@@ -146,11 +146,13 @@ cargo run --release -p logscope-testsupport --bin bench_import -- logs 1000000
 cargo run --release -p logscope-testsupport --bin bench_query -- 1000000
 ```
 
-Routine CI (format, lint, full tests, desktop shell smoke) runs on a
-self-hosted macOS runner. The Linux shared-core leg runs there too, inside a
-`linux/arm64` container, and the Windows packaging job runs on a hosted
-Windows runner. Both are `workflow_dispatch`-gated so they do not serialize
-behind every pull request on a single runner.
+CI runs on GitHub-hosted runners across three platforms in parallel —
+x86_64 Linux (format, lint, shared-core tests), x86_64 Windows (shared-core
+tests plus a desktop shell build smoke), and arm64 macOS (shared-core tests).
+Per-OS Cargo caches are saved only from `main`, so pull requests always
+restore a known-good cache. The Windows packaging job is
+`workflow_dispatch`-gated; release packaging itself is driven locally via
+`scripts/package-portable.ps1` (ADR-0018).
 
 ## Privacy and security
 
