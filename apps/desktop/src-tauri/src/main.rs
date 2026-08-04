@@ -8,6 +8,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod case_cmds;
 mod explorer_cmds;
 
 use std::collections::HashMap;
@@ -370,7 +371,38 @@ fn main() {
             explorer_cmds::export_status,
             explorer_cmds::index_status,
             explorer_cmds::rebuild_indexes,
-            explorer_cmds::list_import_profiles
+            explorer_cmds::list_import_profiles,
+            case_cmds::list_investigations,
+            case_cmds::create_investigation,
+            case_cmds::update_investigation,
+            case_cmds::set_investigation_status,
+            case_cmds::investigation_bundle,
+            case_cmds::investigation_activity,
+            case_cmds::create_hypothesis,
+            case_cmds::update_hypothesis,
+            case_cmds::set_hypothesis_state,
+            case_cmds::link_hypothesis_evidence,
+            case_cmds::unlink_hypothesis_evidence,
+            case_cmds::create_item,
+            case_cmds::update_item_content,
+            case_cmds::set_item_status,
+            case_cmds::set_item_archived,
+            case_cmds::reorder_case_children,
+            case_cmds::create_evidence_group,
+            case_cmds::rename_evidence_group,
+            case_cmds::delete_evidence_group,
+            case_cmds::update_evidence_annotation,
+            case_cmds::set_evidence_group,
+            case_cmds::set_evidence_archived,
+            case_cmds::evidence_history,
+            case_cmds::pin_event,
+            case_cmds::pin_selection,
+            case_cmds::pin_query,
+            case_cmds::pin_group,
+            case_cmds::pin_interval,
+            case_cmds::pin_item,
+            case_cmds::start_verify_evidence,
+            case_cmds::evidence_restore_context
         ])
         .run(tauri::generate_context!())
         .expect("error while running LogScope");

@@ -30,6 +30,26 @@ import type { LogRowV2Dto } from "./bindings/LogRowV2Dto";
 import type { DiagnosticDto } from "./bindings/DiagnosticDto";
 import type { HighlightDto } from "./bindings/HighlightDto";
 import type { FieldInfoDto } from "./bindings/FieldInfoDto";
+import type { InvestigationDto } from "./bindings/InvestigationDto";
+import type { NewInvestigationDto } from "./bindings/NewInvestigationDto";
+import type { InvestigationEditDto } from "./bindings/InvestigationEditDto";
+import type { InvestigationBundleDto } from "./bindings/InvestigationBundleDto";
+import type { HypothesisDto } from "./bindings/HypothesisDto";
+import type { ItemDto } from "./bindings/ItemDto";
+import type { NewItemDto } from "./bindings/NewItemDto";
+import type { EvidenceDto } from "./bindings/EvidenceDto";
+import type { EvidenceGroupDto } from "./bindings/EvidenceGroupDto";
+import type { HistoryDto } from "./bindings/HistoryDto";
+import type { PinEventDto } from "./bindings/PinEventDto";
+import type { PinSelectionDto } from "./bindings/PinSelectionDto";
+import type { PinQueryDto } from "./bindings/PinQueryDto";
+import type { PinGroupDto } from "./bindings/PinGroupDto";
+import type { PinIntervalDto } from "./bindings/PinIntervalDto";
+import type { PinItemDto } from "./bindings/PinItemDto";
+import type { VerifyStartedDto } from "./bindings/VerifyStartedDto";
+import type { VerifyFinishedDto } from "./bindings/VerifyFinishedDto";
+import type { VerificationReportDto } from "./bindings/VerificationReportDto";
+import type { RestoreContextDto } from "./bindings/RestoreContextDto";
 
 export type {
   WorkspaceInfoDto,
@@ -55,7 +75,50 @@ export type {
   DiagnosticDto,
   HighlightDto,
   FieldInfoDto,
+  InvestigationDto,
+  NewInvestigationDto,
+  InvestigationEditDto,
+  InvestigationBundleDto,
+  HypothesisDto,
+  ItemDto,
+  NewItemDto,
+  EvidenceDto,
+  EvidenceGroupDto,
+  HistoryDto,
+  PinEventDto,
+  PinSelectionDto,
+  PinQueryDto,
+  PinGroupDto,
+  PinIntervalDto,
+  PinItemDto,
+  VerifyStartedDto,
+  VerifyFinishedDto,
+  VerificationReportDto,
+  RestoreContextDto,
 };
+
+/// Vocabulary mirrors of `logscope-case::vocab` (storage strings).
+export const INVESTIGATION_STATUSES = [
+  "open",
+  "investigating",
+  "mitigated",
+  "resolved",
+  "archived",
+] as const;
+export const SEVERITIES = ["sev1", "sev2", "sev3", "sev4"] as const;
+export const HYPOTHESIS_STATES = [
+  "unverified",
+  "supported",
+  "rejected",
+  "confirmed",
+] as const;
+export const ITEM_KINDS = ["note", "task", "finding", "question"] as const;
+export const TASK_STATUSES = ["todo", "doing", "done", "dropped"] as const;
+export const QUESTION_STATUSES = ["open", "answered", "deferred"] as const;
+
+export function isStaleRevision(e: unknown): boolean {
+  return isErrorDto(e) && e.code === "workspace/stale-revision";
+}
 
 export function isErrorDto(e: unknown): e is ErrorDto {
   return typeof e === "object" && e !== null && "code" in e && "message" in e;
@@ -131,4 +194,197 @@ export const api = {
   indexStatus: () => invoke<IndexStateDto[]>("index_status"),
   rebuildIndexes: () => invoke<string>("rebuild_indexes"),
   listImportProfiles: () => invoke<[string, string][]>("list_import_profiles"),
+
+  // ---- v0.3 investigations + evidence ----
+  listInvestigations: (includeArchived: boolean) =>
+    invoke<InvestigationDto[]>("list_investigations", { includeArchived }),
+  createInvestigation: (request: NewInvestigationDto) =>
+    invoke<InvestigationDto>("create_investigation", { request }),
+  updateInvestigation: (request: InvestigationEditDto) =>
+    invoke<InvestigationDto>("update_investigation", { request }),
+  setInvestigationStatus: (
+    investigationId: string,
+    expectedRevision: number,
+    status: string,
+  ) =>
+    invoke<InvestigationDto>("set_investigation_status", {
+      investigationId,
+      expectedRevision,
+      status,
+    }),
+  investigationBundle: (investigationId: string) =>
+    invoke<InvestigationBundleDto>("investigation_bundle", { investigationId }),
+  investigationActivity: (investigationId: string, limit?: number) =>
+    invoke<HistoryDto[]>("investigation_activity", { investigationId, limit }),
+
+  createHypothesis: (
+    investigationId: string,
+    statement: string,
+    rationale: string | null,
+  ) =>
+    invoke<HypothesisDto>("create_hypothesis", {
+      investigationId,
+      statement,
+      rationale,
+    }),
+  updateHypothesis: (
+    hypothesisId: string,
+    expectedRevision: number,
+    statement: string,
+    rationale: string | null,
+  ) =>
+    invoke<HypothesisDto>("update_hypothesis", {
+      hypothesisId,
+      expectedRevision,
+      statement,
+      rationale,
+    }),
+  setHypothesisState: (
+    hypothesisId: string,
+    expectedRevision: number,
+    newState: string,
+  ) =>
+    invoke<HypothesisDto>("set_hypothesis_state", {
+      hypothesisId,
+      expectedRevision,
+      newState,
+    }),
+  linkHypothesisEvidence: (
+    hypothesisId: string,
+    expectedRevision: number,
+    evidenceId: string,
+  ) =>
+    invoke<HypothesisDto>("link_hypothesis_evidence", {
+      hypothesisId,
+      expectedRevision,
+      evidenceId,
+    }),
+  unlinkHypothesisEvidence: (
+    hypothesisId: string,
+    expectedRevision: number,
+    evidenceId: string,
+  ) =>
+    invoke<HypothesisDto>("unlink_hypothesis_evidence", {
+      hypothesisId,
+      expectedRevision,
+      evidenceId,
+    }),
+
+  createItem: (request: NewItemDto) =>
+    invoke<ItemDto>("create_item", { request }),
+  updateItemContent: (
+    itemId: string,
+    expectedRevision: number,
+    content: string,
+  ) =>
+    invoke<ItemDto>("update_item_content", {
+      itemId,
+      expectedRevision,
+      content,
+    }),
+  setItemStatus: (
+    itemId: string,
+    expectedRevision: number,
+    taskStatus: string | null,
+    questionStatus: string | null,
+  ) =>
+    invoke<ItemDto>("set_item_status", {
+      itemId,
+      expectedRevision,
+      taskStatus,
+      questionStatus,
+    }),
+  setItemArchived: (
+    itemId: string,
+    expectedRevision: number,
+    archived: boolean,
+  ) =>
+    invoke<ItemDto>("set_item_archived", { itemId, expectedRevision, archived }),
+  reorderCaseChildren: (
+    investigationId: string,
+    expectedInvestigationRevision: number,
+    entityKind: string,
+    orderedIds: string[],
+  ) =>
+    invoke<InvestigationDto>("reorder_case_children", {
+      investigationId,
+      expectedInvestigationRevision,
+      entityKind,
+      orderedIds,
+    }),
+
+  createEvidenceGroup: (investigationId: string, name: string) =>
+    invoke<EvidenceGroupDto>("create_evidence_group", {
+      investigationId,
+      name,
+    }),
+  renameEvidenceGroup: (
+    groupId: string,
+    expectedRevision: number,
+    name: string,
+  ) =>
+    invoke<EvidenceGroupDto>("rename_evidence_group", {
+      groupId,
+      expectedRevision,
+      name,
+    }),
+  deleteEvidenceGroup: (groupId: string) =>
+    invoke<void>("delete_evidence_group", { groupId }),
+  updateEvidenceAnnotation: (
+    evidenceId: string,
+    expectedRevision: number,
+    title: string,
+    annotation: string | null,
+    relevance: string | null,
+  ) =>
+    invoke<EvidenceDto>("update_evidence_annotation", {
+      evidenceId,
+      expectedRevision,
+      title,
+      annotation,
+      relevance,
+    }),
+  setEvidenceGroup: (
+    evidenceId: string,
+    expectedRevision: number,
+    groupId: string | null,
+  ) =>
+    invoke<EvidenceDto>("set_evidence_group", {
+      evidenceId,
+      expectedRevision,
+      groupId,
+    }),
+  setEvidenceArchived: (
+    evidenceId: string,
+    expectedRevision: number,
+    archived: boolean,
+  ) =>
+    invoke<EvidenceDto>("set_evidence_archived", {
+      evidenceId,
+      expectedRevision,
+      archived,
+    }),
+  evidenceHistory: (evidenceId: string) =>
+    invoke<HistoryDto[]>("evidence_history", { evidenceId }),
+
+  pinEvent: (request: PinEventDto) =>
+    invoke<EvidenceDto>("pin_event", { request }),
+  pinSelection: (request: PinSelectionDto) =>
+    invoke<EvidenceDto>("pin_selection", { request }),
+  pinQuery: (request: PinQueryDto) =>
+    invoke<EvidenceDto>("pin_query", { request }),
+  pinGroup: (request: PinGroupDto) =>
+    invoke<EvidenceDto>("pin_group", { request }),
+  pinInterval: (request: PinIntervalDto) =>
+    invoke<EvidenceDto>("pin_interval", { request }),
+  pinItem: (request: PinItemDto) =>
+    invoke<EvidenceDto>("pin_item", { request }),
+
+  startVerifyEvidence: (investigationId: string, only: string[] | null) =>
+    invoke<VerifyStartedDto>("start_verify_evidence", {
+      investigationId,
+      only,
+    }),
+  evidenceRestoreContext: (evidenceId: string) =>
+    invoke<RestoreContextDto>("evidence_restore_context", { evidenceId }),
 };

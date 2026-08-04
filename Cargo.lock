@@ -2656,6 +2656,7 @@ version = "0.2.2"
 dependencies = [
  "crossbeam-channel",
  "logscope-app",
+ "logscope-case",
  "logscope-ingest",
  "logscope-jobs",
  "logscope-model",

@@ -5,8 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api, errorText } from "./api";
-import type { OverviewDto, WorkspaceInfoDto } from "./api";
+import type { OverviewDto, RestoreContextDto, WorkspaceInfoDto } from "./api";
 import Explorer from "./Explorer";
+import CaseView from "./Case";
 
 type JobEventPayload = {
   event: "started" | "progress" | "finished";
@@ -41,7 +42,9 @@ export default function App() {
   >("jsonl");
   const [activeJob, setActiveJob] = useState<string | null>(null);
   const [jobLine, setJobLine] = useState<string>("");
-  const [view, setView] = useState<"home" | "explorer">("home");
+  const [view, setView] = useState<"home" | "explorer" | "case">("home");
+  const [pendingRestore, setPendingRestore] =
+    useState<RestoreContextDto | null>(null);
   const importFinishedRef = useRef<() => void>(() => {});
 
   const refreshOverview = useCallback(async () => {
@@ -180,6 +183,26 @@ export default function App() {
             void refreshOverview();
           }}
           onOpenImport={() => setView("home")}
+          restore={pendingRestore}
+          onRestoreConsumed={() => setPendingRestore(null)}
+        />
+      </main>
+    );
+  }
+
+  if (view === "case" && workspace) {
+    return (
+      <main className="main-wide">
+        {error && <div className="error">{error}</div>}
+        <CaseView
+          onBack={() => {
+            setView("home");
+            void refreshOverview();
+          }}
+          onJumpToExplorer={(ctx) => {
+            setPendingRestore(ctx);
+            setView("explorer");
+          }}
         />
       </main>
     );
@@ -246,6 +269,9 @@ export default function App() {
                 }
               >
                 Explore logs
+              </button>
+              <button onClick={() => setView("case")} disabled={!!activeJob}>
+                Investigations
               </button>
               <button onClick={doClose}>Close workspace</button>
               <button onClick={refreshOverview}>Refresh</button>

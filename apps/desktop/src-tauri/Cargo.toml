@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 logscope-app.workspace = true
+logscope-case.workspace = true
 logscope-workspace.workspace = true
 logscope-query.workspace = true
 logscope-query-lang.workspace = true
