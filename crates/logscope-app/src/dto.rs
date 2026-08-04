@@ -656,6 +656,7 @@ pub struct InvestigationBundleDto {
     pub items: Vec<ItemDto>,
     pub evidence: Vec<EvidenceDto>,
     pub groups: Vec<EvidenceGroupDto>,
+    pub markers: Vec<MarkerDto>,
 }
 
 // ---- pin requests (mirror logscope_app::case, ids minted server-side) --
@@ -783,6 +784,92 @@ pub struct VerifyFinishedDto {
     pub investigation_id: String,
     pub report: Option<VerificationReportDto>,
     pub error: Option<ErrorDto>,
+}
+
+// ---- timeline ---------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MarkerDto {
+    pub marker_id: String,
+    pub investigation_id: String,
+    /// `deployment | config_change | operator_action | custom`.
+    pub kind: String,
+    pub label: String,
+    pub description: Option<String>,
+    #[ts(type = "number | null")]
+    pub at_nanos: Option<i64>,
+    #[ts(type = "number | null")]
+    pub end_nanos: Option<i64>,
+    #[ts(type = "number | null")]
+    pub original_tz_offset_min: Option<i64>,
+    /// Timestamp text exactly as the user entered it.
+    pub original_time_text: Option<String>,
+    #[ts(type = "number")]
+    pub position: i64,
+    pub archived: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    #[ts(type = "number")]
+    pub revision: i64,
+}
+
+/// Marker creation input. Times arrive as RFC 3339 text and are parsed
+/// Rust-side; the original text and zone offset are preserved verbatim.
+/// No time = the undated section.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NewMarkerDto {
+    pub investigation_id: String,
+    pub kind: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub time_text: Option<String>,
+    /// Optional interval end (exclusive); requires `time_text`.
+    pub end_time_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MarkerEditDto {
+    pub marker_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: i64,
+    pub kind: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub time_text: Option<String>,
+    pub end_time_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TimelineEntryDto {
+    /// `marker` or `evidence`.
+    pub entry_kind: String,
+    pub id: String,
+    pub detail_kind: String,
+    pub title: String,
+    #[ts(type = "number | null")]
+    pub at_nanos: Option<i64>,
+    #[ts(type = "number | null")]
+    pub end_nanos: Option<i64>,
+    /// `marker | event_time | interval_bounds | resolved_window | none`.
+    pub time_source: String,
+    pub undated_reason: Option<String>,
+    pub description: Option<String>,
+    pub original_time_text: Option<String>,
+    #[ts(type = "number | null")]
+    pub original_tz_offset_min: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TimelineDto {
+    pub dated: Vec<TimelineEntryDto>,
+    pub undated: Vec<TimelineEntryDto>,
+    #[ts(type = "number")]
+    pub archived_excluded: i64,
 }
 
 // ---- jump-back --------------------------------------------------------

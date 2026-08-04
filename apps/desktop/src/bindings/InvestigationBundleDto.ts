@@ -4,8 +4,9 @@ import type { EvidenceGroupDto } from "./EvidenceGroupDto";
 import type { HypothesisDto } from "./HypothesisDto";
 import type { InvestigationDto } from "./InvestigationDto";
 import type { ItemDto } from "./ItemDto";
+import type { MarkerDto } from "./MarkerDto";
 
 /**
  * Everything the investigation workspace view needs in one fetch.
  */
-export type InvestigationBundleDto = { investigation: InvestigationDto, hypotheses: Array<HypothesisDto>, items: Array<ItemDto>, evidence: Array<EvidenceDto>, groups: Array<EvidenceGroupDto>, };
+export type InvestigationBundleDto = { investigation: InvestigationDto, hypotheses: Array<HypothesisDto>, items: Array<ItemDto>, evidence: Array<EvidenceDto>, groups: Array<EvidenceGroupDto>, markers: Array<MarkerDto>, };

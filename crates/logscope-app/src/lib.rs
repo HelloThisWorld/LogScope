@@ -9,6 +9,7 @@ pub mod dto;
 pub mod explorer;
 pub mod export;
 pub mod import;
+pub mod timeline;
 
 pub use case::{
     dataset_revision, pin_event, pin_group, pin_interval, pin_item, pin_query, pin_selection,

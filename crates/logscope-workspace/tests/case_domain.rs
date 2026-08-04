@@ -674,3 +674,123 @@ fn v2_workspace_migrates_to_v3_without_touching_existing_data() {
         .unwrap();
     assert_eq!(db.list_investigations(false).unwrap().len(), 1);
 }
+
+// ---- timeline markers -------------------------------------------------------
+
+fn new_marker(id: &str, inv: &str, at: Option<i64>) -> logscope_workspace::NewMarker {
+    logscope_workspace::NewMarker {
+        marker_id: id.to_string(),
+        investigation_id: inv.to_string(),
+        kind: "deployment".into(),
+        label: "release 2.4.1 rollout".into(),
+        description: Some("typed by the analyst".into()),
+        at_nanos: at,
+        end_nanos: None,
+        original_tz_offset_min: Some(120),
+        original_time_text: Some("2023-11-14 23:53:20 +02:00".into()),
+    }
+}
+
+#[test]
+fn marker_crud_history_and_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MetaDb::open(&dir.path().join("workspace.db")).unwrap();
+    db.create_investigation(&new_inv("inv-m", "Markers"))
+        .unwrap();
+
+    // Create preserves the original text and offset exactly as entered.
+    let m = db
+        .create_marker(&new_marker(
+            "mark-1",
+            "inv-m",
+            Some(1_700_000_000_000_000_000),
+        ))
+        .unwrap();
+    assert_eq!(m.revision, 1);
+    assert_eq!(
+        m.original_time_text.as_deref(),
+        Some("2023-11-14 23:53:20 +02:00")
+    );
+    assert_eq!(m.original_tz_offset_min, Some(120));
+
+    // Undated marker is legal (renders in the undated section).
+    let undated = db
+        .create_marker(&new_marker("mark-2", "inv-m", None))
+        .unwrap();
+    assert_eq!(undated.at_nanos, None);
+
+    // Interval rules: end without start, and end <= start, are refused.
+    let mut bad = new_marker("mark-3", "inv-m", None);
+    bad.end_nanos = Some(5);
+    assert!(matches!(
+        db.create_marker(&bad),
+        Err(WorkspaceError::Invalid(_))
+    ));
+    let mut bad2 = new_marker("mark-3", "inv-m", Some(10));
+    bad2.end_nanos = Some(10);
+    assert!(matches!(
+        db.create_marker(&bad2),
+        Err(WorkspaceError::Invalid(_))
+    ));
+
+    // Edit bumps the revision and writes history; stale edits conflict.
+    let edited = db
+        .update_marker(&logscope_workspace::MarkerEdit {
+            marker_id: "mark-1".into(),
+            expected_revision: 1,
+            kind: "config_change".into(),
+            label: "feature flag flipped".into(),
+            description: None,
+            at_nanos: Some(1_700_000_500_000_000_000),
+            end_nanos: Some(1_700_000_600_000_000_000),
+            original_tz_offset_min: None,
+            original_time_text: None,
+        })
+        .unwrap();
+    assert_eq!(edited.revision, 2);
+    assert_eq!(edited.kind, "config_change");
+    let stale = db.update_marker(&logscope_workspace::MarkerEdit {
+        marker_id: "mark-1".into(),
+        expected_revision: 1,
+        kind: "custom".into(),
+        label: "x".into(),
+        description: None,
+        at_nanos: None,
+        end_nanos: None,
+        original_tz_offset_min: None,
+        original_time_text: None,
+    });
+    assert!(matches!(stale, Err(WorkspaceError::StaleRevision { .. })));
+
+    // Archive hides from the default listing but never deletes.
+    let archived = db.set_marker_archived("mark-2", 1, true).unwrap();
+    assert!(archived.archived);
+    assert_eq!(db.list_markers("inv-m", false).unwrap().len(), 1);
+    assert_eq!(db.list_markers("inv-m", true).unwrap().len(), 2);
+    db.set_marker_archived("mark-2", 2, false).unwrap();
+
+    // Every mutation left a history row: create x2 + edit + archive + restore.
+    let hist = db.list_entity_history("marker", "mark-2").unwrap();
+    let actions: Vec<&str> = hist.iter().map(|h| h.action.as_str()).collect();
+    assert_eq!(actions, ["created", "archived", "restored"]);
+    let hist1 = db.list_entity_history("marker", "mark-1").unwrap();
+    assert_eq!(
+        hist1.iter().map(|h| h.action.as_str()).collect::<Vec<_>>(),
+        ["created", "edited"]
+    );
+
+    // Markers participate in guarded reordering like every other child.
+    let inv = db.get_investigation("inv-m").unwrap().unwrap();
+    let reordered = db
+        .reorder_children(
+            "inv-m",
+            inv.revision,
+            "marker",
+            &["mark-2".to_string(), "mark-1".to_string()],
+        )
+        .unwrap();
+    assert!(reordered.revision > inv.revision);
+    let listed = db.list_markers("inv-m", true).unwrap();
+    assert_eq!(listed[0].marker_id, "mark-2");
+    assert_eq!(listed[1].marker_id, "mark-1");
+}
