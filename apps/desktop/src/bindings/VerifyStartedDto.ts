@@ -4,4 +4,4 @@ export type VerifyStartedDto = { job_id: string,
 /**
  * Number of evidence items the run will consider.
  */
-total: bigint, };
+total: number, };

@@ -4,4 +4,4 @@
  * Full editable-field update (status changes use their own command so
  * the transition is auditable as such).
  */
-export type InvestigationEditDto = { investigation_id: string, expected_revision: bigint, title: string, description: string | null, severity: string | null, owner_text: string | null, tags: Array<string>, incident_started_at: bigint | null, mitigated_at: bigint | null, resolved_at: bigint | null, window_start: bigint | null, window_end: bigint | null, };
+export type InvestigationEditDto = { investigation_id: string, expected_revision: number, title: string, description: string | null, severity: string | null, owner_text: string | null, tags: Array<string>, incident_started_at: number | null, mitigated_at: number | null, resolved_at: number | null, window_start: number | null, window_end: number | null, };

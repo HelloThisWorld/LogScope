@@ -485,12 +485,18 @@ pub struct InvestigationDto {
     pub created_at: String,
     pub updated_at: String,
     pub status_changed_at: Option<String>,
+    #[ts(type = "number | null")]
     pub incident_started_at: Option<i64>,
+    #[ts(type = "number | null")]
     pub mitigated_at: Option<i64>,
+    #[ts(type = "number | null")]
     pub resolved_at: Option<i64>,
+    #[ts(type = "number | null")]
     pub window_start: Option<i64>,
+    #[ts(type = "number | null")]
     pub window_end: Option<i64>,
     /// Optimistic-concurrency token: every mutation must send it back.
+    #[ts(type = "number")]
     pub revision: i64,
 }
 
@@ -502,8 +508,11 @@ pub struct NewInvestigationDto {
     pub severity: Option<String>,
     pub owner_text: Option<String>,
     pub tags: Vec<String>,
+    #[ts(type = "number | null")]
     pub incident_started_at: Option<i64>,
+    #[ts(type = "number | null")]
     pub window_start: Option<i64>,
+    #[ts(type = "number | null")]
     pub window_end: Option<i64>,
 }
 
@@ -513,16 +522,22 @@ pub struct NewInvestigationDto {
 #[ts(export)]
 pub struct InvestigationEditDto {
     pub investigation_id: String,
+    #[ts(type = "number")]
     pub expected_revision: i64,
     pub title: String,
     pub description: Option<String>,
     pub severity: Option<String>,
     pub owner_text: Option<String>,
     pub tags: Vec<String>,
+    #[ts(type = "number | null")]
     pub incident_started_at: Option<i64>,
+    #[ts(type = "number | null")]
     pub mitigated_at: Option<i64>,
+    #[ts(type = "number | null")]
     pub resolved_at: Option<i64>,
+    #[ts(type = "number | null")]
     pub window_start: Option<i64>,
+    #[ts(type = "number | null")]
     pub window_end: Option<i64>,
 }
 
@@ -534,9 +549,11 @@ pub struct HypothesisDto {
     pub statement: String,
     pub rationale: Option<String>,
     pub state: String,
+    #[ts(type = "number")]
     pub position: i64,
     pub created_at: String,
     pub updated_at: String,
+    #[ts(type = "number")]
     pub revision: i64,
     /// Evidence linked to this hypothesis (ids into the bundle's list).
     pub linked_evidence_ids: Vec<String>,
@@ -552,10 +569,12 @@ pub struct ItemDto {
     pub task_status: Option<String>,
     pub question_status: Option<String>,
     pub authored_by_user: bool,
+    #[ts(type = "number")]
     pub position: i64,
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    #[ts(type = "number")]
     pub revision: i64,
 }
 
@@ -581,6 +600,7 @@ pub struct EvidenceDto {
     pub annotation: Option<String>,
     pub relevance: Option<String>,
     pub group_id: Option<String>,
+    #[ts(type = "number")]
     pub position: i64,
     pub supersedes_evidence_id: Option<String>,
     pub archived: bool,
@@ -592,10 +612,12 @@ pub struct EvidenceDto {
     /// Versioned envelope payloads; the UI renders snapshots read-only
     /// and never re-interprets references (jump-back goes through
     /// `evidence_restore_context`).
+    #[ts(type = "number")]
     pub envelope_version: i64,
     pub snapshot_json: String,
     pub created_at: String,
     pub updated_at: String,
+    #[ts(type = "number")]
     pub revision: i64,
 }
 
@@ -605,16 +627,20 @@ pub struct EvidenceGroupDto {
     pub group_id: String,
     pub investigation_id: String,
     pub name: String,
+    #[ts(type = "number")]
     pub position: i64,
+    #[ts(type = "number")]
     pub revision: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct HistoryDto {
+    #[ts(type = "number")]
     pub history_id: i64,
     pub entity_kind: String,
     pub entity_id: String,
+    #[ts(type = "number")]
     pub revision: i64,
     pub action: String,
     pub detail_json: String,
@@ -694,11 +720,15 @@ pub struct PinGroupDto {
 pub struct PinIntervalDto {
     pub common: PinCommonDto,
     pub scope: QueryScopeDto,
+    #[ts(type = "number")]
     pub start: i64,
+    #[ts(type = "number")]
     pub end: i64,
+    #[ts(type = "number")]
     pub bucket_width_nanos: i64,
     pub display_timezone: String,
     /// Visible neighbor buckets as (bucket_start, count) pairs.
+    #[ts(type = "Array<[number, number]>")]
     pub neighbor_buckets: Vec<(i64, i64)>,
 }
 
@@ -716,6 +746,7 @@ pub struct PinItemDto {
 pub struct VerifyStartedDto {
     pub job_id: String,
     /// Number of evidence items the run will consider.
+    #[ts(type = "number")]
     pub total: i64,
 }
 
@@ -729,13 +760,18 @@ pub struct EvidenceOutcomeDto {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct VerificationReportDto {
+    #[ts(type = "number")]
     pub total: i64,
+    #[ts(type = "number")]
     pub updated: i64,
     pub cancelled: bool,
+    #[ts(type = "number")]
     pub dataset_lookups: i64,
     /// State name → count.
+    #[ts(type = "Record<string, number>")]
     pub states: std::collections::BTreeMap<String, i64>,
     pub outcomes: Vec<EvidenceOutcomeDto>,
+    #[ts(type = "number")]
     pub duration_ms: i64,
 }
 
@@ -764,7 +800,9 @@ pub struct RestoreContextDto {
     pub dataset_ids: Vec<String>,
     pub time_strategy: Option<TimeStrategyDto>,
     /// Concrete half-open bounds resolved at pin time.
+    #[ts(type = "number | null")]
     pub resolved_start: Option<i64>,
+    #[ts(type = "number | null")]
     pub resolved_end: Option<i64>,
     /// Event pins: the record to focus.
     pub record_id: Option<String>,
@@ -772,7 +810,9 @@ pub struct RestoreContextDto {
     /// Selection pins: the captured ids, in order.
     pub record_ids: Vec<String>,
     /// Interval pins: the exact half-open interval.
+    #[ts(type = "number | null")]
     pub interval_start: Option<i64>,
+    #[ts(type = "number | null")]
     pub interval_end: Option<i64>,
     /// Item pins: the referenced workspace item.
     pub item_id: Option<String>,

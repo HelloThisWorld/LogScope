@@ -4,8 +4,8 @@
  * Investigation row as stored; `tags` is the decoded form of the
  * repository's `tags_json`.
  */
-export type InvestigationDto = { investigation_id: string, title: string, description: string | null, status: string, severity: string | null, owner_text: string | null, tags: Array<string>, created_at: string, updated_at: string, status_changed_at: string | null, incident_started_at: bigint | null, mitigated_at: bigint | null, resolved_at: bigint | null, window_start: bigint | null, window_end: bigint | null, 
+export type InvestigationDto = { investigation_id: string, title: string, description: string | null, status: string, severity: string | null, owner_text: string | null, tags: Array<string>, created_at: string, updated_at: string, status_changed_at: string | null, incident_started_at: number | null, mitigated_at: number | null, resolved_at: number | null, window_start: number | null, window_end: number | null, 
 /**
  * Optimistic-concurrency token: every mutation must send it back.
  */
-revision: bigint, };
+revision: number, };

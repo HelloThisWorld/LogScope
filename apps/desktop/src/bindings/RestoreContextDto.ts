@@ -15,7 +15,7 @@ query_text: string | null, dataset_ids: Array<string>, time_strategy: TimeStrate
 /**
  * Concrete half-open bounds resolved at pin time.
  */
-resolved_start: bigint | null, resolved_end: bigint | null, 
+resolved_start: number | null, resolved_end: number | null, 
 /**
  * Event pins: the record to focus.
  */
@@ -27,7 +27,7 @@ record_ids: Array<string>,
 /**
  * Interval pins: the exact half-open interval.
  */
-interval_start: bigint | null, interval_end: bigint | null, 
+interval_start: number | null, interval_end: number | null, 
 /**
  * Item pins: the referenced workspace item.
  */

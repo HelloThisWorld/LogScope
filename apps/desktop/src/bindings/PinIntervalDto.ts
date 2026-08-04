@@ -2,8 +2,8 @@
 import type { PinCommonDto } from "./PinCommonDto";
 import type { QueryScopeDto } from "./QueryScopeDto";
 
-export type PinIntervalDto = { common: PinCommonDto, scope: QueryScopeDto, start: bigint, end: bigint, bucket_width_nanos: bigint, display_timezone: string, 
+export type PinIntervalDto = { common: PinCommonDto, scope: QueryScopeDto, start: number, end: number, bucket_width_nanos: number, display_timezone: string, 
 /**
  * Visible neighbor buckets as (bucket_start, count) pairs.
  */
-neighbor_buckets: Array<[bigint, bigint]>, };
+neighbor_buckets: Array<[number, number]>, };

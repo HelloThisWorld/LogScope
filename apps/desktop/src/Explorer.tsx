@@ -27,10 +27,13 @@ import type {
   QueryPageV2Dto,
   RecentSearchDto,
   RecordDetailDto,
+  RestoreContextDto,
   SavedSearchDto,
   SourceContextDto,
   TimeStrategyDto,
 } from "./api";
+import PinDialog from "./PinDialog";
+import type { PinScope, PinTarget } from "./PinDialog";
 
 const ROW_HEIGHT = 26;
 const PAGE_LIMIT = 200;
@@ -269,10 +272,15 @@ export default function Explorer({
   overview,
   onBack,
   onOpenImport,
+  restore,
+  onRestoreConsumed,
 }: {
   overview: OverviewDto;
   onBack: () => void;
   onOpenImport: () => void;
+  /** Evidence jump-back: restore this captured context verbatim. */
+  restore?: RestoreContextDto | null;
+  onRestoreConsumed?: () => void;
 }) {
   const logDatasets = overview.datasets.filter(
     (d) => d.signal === "logs" && d.status === "published",
@@ -317,11 +325,21 @@ export default function Explorer({
   const [exportRunning, setExportRunning] = useState<ExportStatusDto | null>(null);
   const [saveName, setSaveName] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
+  const [pinTarget, setPinTarget] = useState<PinTarget | null>(null);
+  const [pinMessage, setPinMessage] = useState("");
+  const [checked, setChecked] = useState<Set<string>>(new Set());
 
   const seqRef = useRef(0);
   const activeRequest = useRef<string | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const runRef = useRef<
+    | ((opts?: {
+        strategyOverride?: TimeStrategyDto;
+        recordRecent?: boolean;
+      }) => Promise<void>)
+    | null
+  >(null);
 
   const effectiveSelection = selection.length
     ? selection
@@ -439,6 +457,67 @@ export default function Explorer({
       void api.cancelQuery(`${activeRequest.current}-f`);
     }
   }, []);
+
+  runRef.current = run;
+
+  /** The exact scope a pin is made from — what is on screen, verbatim. */
+  const currentScope = (): PinScope => ({
+    queryText,
+    datasetIds: selection,
+    timeStrategy: strategy,
+  });
+
+  // Evidence jump-back: apply the captured context exactly as stored —
+  // exact query, exact datasets, concrete resolved bounds when present —
+  // then run. Never broadened: a relative strategy is restored as the
+  // absolute window it resolved to at pin time.
+  useEffect(() => {
+    if (!restore) return;
+    const r = restore;
+    onRestoreConsumed?.();
+    setChecked(new Set());
+    setSelection(r.dataset_ids);
+    setQueryText(r.query_text ?? "");
+    let strat: TimeStrategyDto =
+      r.time_strategy ?? { kind: "all", start: null, end: null, duration_nanos: null };
+    const freeze = (s: number, e: number): TimeStrategyDto => ({
+      kind: "absolute",
+      start: nb(s),
+      end: nb(e),
+      duration_nanos: null,
+    });
+    if (r.interval_start != null && r.interval_end != null) {
+      strat = freeze(r.interval_start, r.interval_end);
+    } else if (
+      strat.kind === "relative_to_latest" &&
+      r.resolved_start != null &&
+      r.resolved_end != null
+    ) {
+      strat = freeze(r.resolved_start, r.resolved_end);
+    }
+    setStrategy(strat);
+    setPinMessage(`restored from evidence (${r.kind})`);
+    if (r.kind === "event" && r.record_id && r.dataset_id) {
+      const datasetId = r.dataset_id;
+      const recordId = r.record_id;
+      void (async () => {
+        try {
+          const d = await api.getRecord(datasetId, recordId);
+          setSelected(d.row);
+          setDetail(d);
+          setDetailTab("fields");
+        } catch (e) {
+          setError(errorText(e));
+        }
+      })();
+    } else if (r.query_text != null) {
+      // Let React commit the restored state, then execute it.
+      setTimeout(() => {
+        void runRef.current?.({ strategyOverride: strat, recordRecent: false });
+      }, 0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restore]);
 
   const loadMore = useCallback(async () => {
     if (!page?.has_more || !page.next_cursor || loadingMore) return;
@@ -644,6 +723,35 @@ export default function Explorer({
           </span>
         )}
         <span className="spacer" />
+        <button
+          onClick={() =>
+            setPinTarget({
+              kind: "query",
+              scope: currentScope(),
+              savedSearchId: null,
+            })
+          }
+          disabled={phase !== "done"}
+          title="Pin the current query, dataset selection and time window as evidence"
+        >
+          Pin query
+        </button>
+        {checked.size > 0 && (
+          <button
+            onClick={() =>
+              setPinTarget({
+                kind: "selection",
+                recordIds: rows
+                  .filter((r) => checked.has(r.record_id))
+                  .map((r) => r.record_id),
+                scope: currentScope(),
+              })
+            }
+            title="Pin the checked rows, in table order, as one selection"
+          >
+            Pin selection ({checked.size})
+          </button>
+        )}
         <button onClick={() => setExportOpen(true)} disabled={phase !== "done"}>
           Export…
         </button>
@@ -825,6 +933,32 @@ export default function Explorer({
       />
 
       <div className="status-line" role="status">
+        {strategy.kind === "absolute" &&
+          strategy.start != null &&
+          strategy.end != null &&
+          histogram &&
+          !histogram.empty && (
+            <button
+              className="link"
+              onClick={() =>
+                setPinTarget({
+                  kind: "interval",
+                  scope: currentScope(),
+                  start: Number(strategy.start),
+                  end: Number(strategy.end),
+                  bucketWidthNanos: Number(histogram.bin_width_nanos),
+                  displayTimezone: "UTC",
+                  neighborBuckets: histogram.bins
+                    .slice(0, 60)
+                    .map((b) => [Number(b.start), Number(b.count)]),
+                })
+              }
+              title="Pin the brushed half-open interval with its visible histogram context"
+            >
+              📌 pin interval
+            </button>
+          )}
+        {pinMessage && <span className="dim">{pinMessage}</span>}
         {phase === "running" && <span className="badge">running…</span>}
         {phase === "done" && page && (
           <>
@@ -923,12 +1057,44 @@ export default function Explorer({
                           >
                             −
                           </button>
+                          <button
+                            className="link dim"
+                            aria-label={`Pin group ${f.display} = ${v.value} as evidence`}
+                            title="Pin this group as evidence"
+                            onClick={() =>
+                              setPinTarget({
+                                kind: "group",
+                                scope: currentScope(),
+                                field: f.display,
+                                valueJson: JSON.stringify(v.value),
+                                label: v.value,
+                              })
+                            }
+                          >
+                            📌
+                          </button>
                           <span className="num dim">{fmtCount(v.count)}</span>
                         </div>
                       ))}
                       {Number(f.missing_count) > 0 && (
                         <div className="facet-value dim">
                           <span>(missing)</span>
+                          <button
+                            className="link dim"
+                            aria-label={`Pin missing-value group of ${f.display} as evidence`}
+                            title="Pin the missing-value group as evidence"
+                            onClick={() =>
+                              setPinTarget({
+                                kind: "group",
+                                scope: currentScope(),
+                                field: f.display,
+                                valueJson: "null",
+                                label: "(missing)",
+                              })
+                            }
+                          >
+                            📌
+                          </button>
                           <span className="num">{fmtCount(f.missing_count)}</span>
                         </div>
                       )}
@@ -1012,6 +1178,24 @@ export default function Explorer({
                     }}
                   >
                     {s.name}
+                  </button>
+                  <button
+                    className="link dim"
+                    aria-label={`Pin saved search ${s.name} as evidence`}
+                    title="Pin this saved search as evidence (captured, never substituted)"
+                    onClick={() =>
+                      setPinTarget({
+                        kind: "query",
+                        scope: {
+                          queryText: s.query_text,
+                          datasetIds: s.all_datasets ? [] : s.dataset_ids,
+                          timeStrategy: s.time_strategy,
+                        },
+                        savedSearchId: s.saved_search_id,
+                      })
+                    }
+                  >
+                    📌
                   </button>
                   <button
                     className="link dim"
@@ -1155,6 +1339,17 @@ export default function Explorer({
           style={{ height: viewH }}
         >
           <div className="table-header" role="row">
+            <span className="col col-check" role="columnheader" aria-label="Selection">
+              {checked.size > 0 && (
+                <button
+                  className="link dim"
+                  aria-label="Clear selection"
+                  onClick={() => setChecked(new Set())}
+                >
+                  ×
+                </button>
+              )}
+            </span>
             {columns.map((c) => (
               <span key={c} className={`col col-${c === "message" ? "grow" : "fix"}`} role="columnheader">
                 {c}
@@ -1183,6 +1378,24 @@ export default function Explorer({
                 style={{ top: (first + i) * ROW_HEIGHT, height: ROW_HEIGHT }}
                 onClick={() => void openDetail(row)}
               >
+                <span
+                  className="col col-check"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={`Select event ${row.record_id}`}
+                    checked={checked.has(row.record_id)}
+                    onChange={(e) => {
+                      setChecked((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(row.record_id);
+                        else next.delete(row.record_id);
+                        return next;
+                      });
+                    }}
+                  />
+                </span>
                 {columns.map((c) => (
                   <span key={c} className={`col col-${c === "message" ? "grow" : "fix"}`}>
                     {clampText(cellValue(row, c), c === "message" ? 300 : 64)}
@@ -1214,6 +1427,20 @@ export default function Explorer({
                 )}
               </nav>
               <div className="detail-actions">
+                <button
+                  className="link"
+                  title="Pin this event as evidence"
+                  onClick={() =>
+                    setPinTarget({
+                      kind: "event",
+                      datasetId: selected.dataset_id,
+                      recordId: selected.record_id,
+                      displayFields: columns,
+                    })
+                  }
+                >
+                  📌 pin event
+                </button>
                 <button
                   className="link"
                   onClick={() => {
@@ -1435,6 +1662,17 @@ export default function Explorer({
           )}
         </aside>
       </div>
+
+      {pinTarget && (
+        <PinDialog
+          target={pinTarget}
+          onClose={() => setPinTarget(null)}
+          onPinned={(msg) => {
+            setPinMessage(msg);
+            setChecked(new Set());
+          }}
+        />
+      )}
 
       {exportOpen && (
         <div className="modal" role="dialog" aria-label="Export results">
