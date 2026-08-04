@@ -55,6 +55,7 @@ fn workspace_info(ws: &Workspace, recovery: bool) -> WorkspaceInfoDto {
             removed_orphan_files: ws.recovery.removed_orphan_files.clone(),
             interrupted_jobs: ws.recovery.interrupted_jobs.clone(),
             discarded_staging_datasets: ws.recovery.discarded_staging_datasets.clone(),
+            interrupted_case_records: ws.recovery.interrupted_case_records.clone(),
         }),
     }
 }

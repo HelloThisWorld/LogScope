@@ -2162,6 +2162,54 @@ impl MetaDb {
         Ok(rows)
     }
 
+    // ---- crash recovery --------------------------------------------------------
+
+    /// Crash recovery, run on workspace open: every `running` report
+    /// artifact and bundle export is finished as failed
+    /// (`job/interrupted`). The tombstone stays as honest evidence of
+    /// the interrupted attempt — it is finished, never deleted. Returns
+    /// `kind:id` for each record finished; idempotent by construction
+    /// (a finished record is no longer `running`).
+    pub fn fail_interrupted_case_records(&self) -> Result<Vec<String>, WorkspaceError> {
+        // Collect ids first and drop the guard: the finish fns take the
+        // (non-reentrant) connection themselves.
+        let ids: Vec<(&'static str, String)> = {
+            let conn = self.raw();
+            let mut out: Vec<(&'static str, String)> = Vec::new();
+            let mut stmt =
+                conn.prepare("SELECT artifact_id FROM report_artifacts WHERE status = 'running'")?;
+            for id in stmt.query_map([], |r| r.get::<_, String>(0))? {
+                out.push(("report_artifact", id?));
+            }
+            let mut stmt2 =
+                conn.prepare("SELECT bundle_id FROM bundle_exports WHERE status = 'running'")?;
+            for id in stmt2.query_map([], |r| r.get::<_, String>(0))? {
+                out.push(("bundle_export", id?));
+            }
+            out
+        };
+        let err = serde_json::json!({
+            "code": "job/interrupted",
+            "message": "generation was interrupted by application shutdown; \
+                        no artifact was published",
+            "recovered": true,
+        })
+        .to_string();
+        let mut finished = Vec::with_capacity(ids.len());
+        for (kind, id) in ids {
+            match kind {
+                "report_artifact" => {
+                    self.finish_report_artifact(&id, "failed", None, None, Some(&err))?;
+                }
+                _ => {
+                    self.finish_bundle_export(&id, "failed", None, None, None, Some(&err))?;
+                }
+            }
+            finished.push(format!("{kind}:{id}"));
+        }
+        Ok(finished)
+    }
+
     // ---- reordering -----------------------------------------------------------
 
     /// Reorders children of one investigation. `entity_kind` selects the

@@ -1007,3 +1007,76 @@ fn report_defs_attach_and_detach_redaction_profiles() {
         .unwrap();
     assert_eq!(detached.redaction_profile_id, None);
 }
+
+// ---- crash recovery for case records ----------------------------------------
+
+#[test]
+fn reopen_finishes_running_tombstones_and_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    {
+        let ws = logscope_workspace::Workspace::create(&root, "recovery", "0.3.0-test").unwrap();
+        ws.meta
+            .create_investigation(&new_inv("inv-rec", "Recovery"))
+            .unwrap();
+        ws.meta
+            .create_report_def(&logscope_workspace::NewReportDef {
+                report_def_id: "rep-rec".into(),
+                investigation_id: "inv-rec".into(),
+                title: "t".into(),
+                subtitle: None,
+                sections_json: "[]".into(),
+                selected_evidence_json: "[]".into(),
+                selected_markers_json: "[]".into(),
+                options_json: "{}".into(),
+            })
+            .unwrap();
+        // One finished and one interrupted of each kind.
+        ws.meta
+            .start_report_artifact(
+                "art-done", "rep-rec", "inv-rec", "markdown", "C:/x.md", "{}",
+            )
+            .unwrap();
+        ws.meta
+            .finish_report_artifact("art-done", "completed", Some("ab"), Some(1), None)
+            .unwrap();
+        ws.meta
+            .start_report_artifact("art-hung", "rep-rec", "inv-rec", "html", "C:/y.html", "{}")
+            .unwrap();
+        ws.meta
+            .start_bundle_export("bun-hung", "inv-rec", "C:/z.logscope-case")
+            .unwrap();
+        // Workspace dropped here with two records still `running` —
+        // simulating a crash mid-generation.
+    }
+
+    let ws = logscope_workspace::Workspace::open(&root, "0.3.0-test").unwrap();
+    let mut recovered = ws.recovery.interrupted_case_records.clone();
+    recovered.sort();
+    assert_eq!(
+        recovered,
+        ["bundle_export:bun-hung", "report_artifact:art-hung"]
+    );
+
+    // The tombstones are finished as failed with the interrupted code —
+    // completed records are untouched.
+    let arts = ws.meta.list_report_artifacts("inv-rec").unwrap();
+    let hung = arts.iter().find(|a| a.artifact_id == "art-hung").unwrap();
+    assert_eq!(hung.status, "failed");
+    assert!(hung
+        .error_json
+        .as_deref()
+        .unwrap()
+        .contains("job/interrupted"));
+    assert!(hung.finished_at.is_some());
+    let done = arts.iter().find(|a| a.artifact_id == "art-done").unwrap();
+    assert_eq!(done.status, "completed");
+    let bundles = ws.meta.list_bundle_exports("inv-rec").unwrap();
+    assert_eq!(bundles[0].status, "failed");
+    drop(ws);
+
+    // Idempotent: a second reopen finds nothing left to recover.
+    let ws2 = logscope_workspace::Workspace::open(&root, "0.3.0-test").unwrap();
+    assert!(ws2.recovery.interrupted_case_records.is_empty());
+    assert!(ws2.recovery.is_clean());
+}
