@@ -198,6 +198,18 @@ jobs:
         # `-D warnings` belongs to the macOS lint job, and setting it here
         # would invalidate this cache on every flag change while adding no
         # signal (see the no-clippy rationale above).
+        #
+        # CARGO_BUILD_JOBS=4: unbounded parallelism inside the VM starved
+        # the runner HOST. Run 30870034552 died 10 minutes into this step
+        # with the machine provably awake (pmset log shows no sleep in the
+        # death window, caffeinate held, user at the keyboard) — the
+        # loss-of-communication signature, at GitHub's ~10-minute lost-
+        # contact threshold. Leading explanation: the DuckDB C++ build at
+        # full parallelism inside Rancher Desktop's VM pushed the laptop
+        # host into memory thrash until the runner agent missed its
+        # heartbeats. Four jobs (~1-1.5 GB each at peak for the C++ units)
+        # bound peak memory while costing little wall time, since the
+        # cached volumes absorb most of the work after the first run.
         run: |
           docker run --rm \
             -v "$PWD":/work -w /work \
@@ -206,6 +218,7 @@ jobs:
             -e CARGO_TERM_COLOR=always \
             -e CARGO_TARGET_DIR=/target \
             -e CARGO_PROFILE_DEV_DEBUG=0 \
+            -e CARGO_BUILD_JOBS=4 \
             rust:1-bookworm \
             bash -c '
               set -euo pipefail
