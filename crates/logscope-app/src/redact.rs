@@ -146,7 +146,15 @@ impl Projection {
         let posture: RedactionPosture = if posture_json.trim().is_empty() {
             RedactionPosture::default()
         } else {
-            serde_json::from_str(posture_json)
+            // Require an object: serde's derived struct deserializer also
+            // accepts a positional array, which would let `["include"]`
+            // silently widen the path policy.
+            let value: serde_json::Value = serde_json::from_str(posture_json)
+                .map_err(|e| invalid(format!("posture_json does not parse: {e}")))?;
+            if !value.is_object() {
+                return Err(invalid("posture_json must be a JSON object"));
+            }
+            serde_json::from_value(value)
                 .map_err(|e| invalid(format!("posture_json does not parse: {e}")))?
         };
         let mut compiled = Vec::with_capacity(rules.len());

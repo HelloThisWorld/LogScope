@@ -33,6 +33,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use logscope_case::HypothesisState;
 use logscope_jobs::JobError;
 use logscope_query::EngineConnection;
 use logscope_workspace::{
@@ -283,9 +284,27 @@ fn build_bundle(
         .meta
         .list_evidence_groups(investigation_id)
         .map_err(ws_err)?;
-    let hyp_values: Vec<_> = hypotheses
+    // Each hypothesis entry carries its evidence links (added after the
+    // projection: the ids are opaque and present in evidence.jsonl
+    // anyway). Import restores them once the evidence rows exist.
+    let hyp_values: Vec<serde_json::Value> = hypotheses
         .iter()
-        .map(|h| project_row(h, projection, summary))
+        .map(|h| {
+            let mut v = project_row(h, projection, summary)?;
+            let linked = ws
+                .meta
+                .linked_evidence_ids(&h.hypothesis_id)
+                .map_err(ws_err)?;
+            if let serde_json::Value::Object(map) = &mut v {
+                map.insert(
+                    "linked_evidence_ids".into(),
+                    serde_json::Value::Array(
+                        linked.into_iter().map(serde_json::Value::String).collect(),
+                    ),
+                );
+            }
+            Ok::<_, JobError>(v)
+        })
         .collect::<Result<_, _>>()?;
     let item_values: Vec<_> = items
         .iter()
@@ -1010,6 +1029,7 @@ fn insert_case(
         .map_err(|e| hostile(format!("investigation insert failed: {e}")))?;
 
     let mut counts = (0usize, 0usize, 0usize, 0usize); // hyp, item, marker, evidence
+    let mut hyp_restore: Vec<(String, Option<String>, Vec<String>)> = Vec::new();
     for h in parse(get("investigation/hypotheses.json")?, "hypotheses")?
         .as_array()
         .unwrap_or(&Vec::new())
@@ -1022,6 +1042,16 @@ fn insert_case(
                 rationale: opt_str(h, "rationale"),
             })
             .map_err(|e| hostile(format!("hypothesis insert failed: {e}")))?;
+        let linked: Vec<String> = h
+            .get("linked_evidence_ids")
+            .and_then(|x| x.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        hyp_restore.push((str_of(h, "hypothesis_id"), opt_str(h, "state"), linked));
         counts.0 += 1;
     }
     for it in parse(get("investigation/items.json")?, "items")?
@@ -1085,6 +1115,42 @@ fn insert_case(
             })
             .map_err(|e| hostile(format!("evidence insert failed: {e}")))?;
         counts.3 += 1;
+    }
+
+    // Restore hypothesis states and evidence links now that the linked
+    // evidence rows exist. A state that does not parse (older bundle, or
+    // a disclosure-projected field) stays `unverified` — the import
+    // never upgrades a claim it cannot read. A link to evidence the
+    // bundle does not contain is hostile.
+    for (hypothesis_id, state, linked) in hyp_restore {
+        let mut revision = 1i64;
+        if let Some(state) = state.filter(|s| s != "unverified") {
+            if HypothesisState::parse(&state).is_some() {
+                let row = ws
+                    .meta
+                    .set_hypothesis_state(&hypothesis_id, revision, &state)
+                    .map_err(|e| hostile(format!("hypothesis state restore failed: {e}")))?;
+                revision = row.revision;
+            }
+        }
+        for evidence_id in linked {
+            if ws
+                .meta
+                .get_evidence(&evidence_id)
+                .map_err(|e| hostile(format!("evidence lookup failed: {e}")))?
+                .is_none()
+            {
+                return Err(hostile(format!(
+                    "hypothesis {hypothesis_id} links evidence {evidence_id} \
+                     that the bundle does not contain"
+                )));
+            }
+            let row = ws
+                .meta
+                .link_hypothesis_evidence(&hypothesis_id, revision, &evidence_id)
+                .map_err(|e| hostile(format!("hypothesis link restore failed: {e}")))?;
+            revision = row.revision;
+        }
     }
 
     let mut saved_count = 0usize;
