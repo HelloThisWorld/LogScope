@@ -1,5 +1,96 @@
 # Changelog
 
+## 0.3.0 — 2026-08-05
+
+The investigation workbench: durable investigations, versioned evidence
+pinned from the Explorer, an investigation timeline, deterministic offline
+reports behind a disclosure preview, and a portable case bundle that
+round-trips offline. Suite: 292 tests green; fmt/clippy (`-D warnings`)
+clean; measured 5M-record baseline recorded.
+
+### Added
+- **Investigation domain** (workspace schema v3, transactional migration
+  0003): investigations with status/severity/owner-text/tags/windows,
+  hypotheses with manual states (`unverified|supported|rejected|confirmed`)
+  and linked evidence, notes/tasks/findings/questions — every entity
+  revisioned, with same-transaction history rows, optimistic-revision
+  conflict detection (`workspace/stale-revision`), and archive-not-delete
+  semantics throughout.
+- **Evidence envelope v1** (`logscope-case`): six pin kinds (event, bounded
+  selection, query, Explorer group, histogram interval, item reference),
+  each storing a versioned typed live reference plus a bounded captured
+  snapshot. Newer envelope versions are refused, not reinterpreted;
+  undecodable payloads are reported, never dropped.
+- **Pin services + batched resolver** (`logscope-app::case`): pinning runs
+  through the authoritative query pipeline (a relative time strategy is
+  frozen to concrete bounds at pin time); batch verification is bounded,
+  cancellable, avoids N+1 canonical lookups (asserted: 1,001 evidence =
+  one dataset lookup), reports honest integrity states (verified /
+  revision-drifted / source-changed / source-missing / unavailable /
+  unsupported-version / undecodable), and never rewrites a snapshot.
+- **Investigation timeline**: merges dated evidence and manual markers
+  (deployment/config-change/operator-action/custom) in a deterministic
+  documented order, preserves the marker's original timezone text and
+  offset, and keeps missing-time entries in an explicit undated section
+  that states each entry's reason.
+- **Reports**: definition → consistent captured snapshot → deterministic
+  Markdown (LF-only, dynamic fences) and self-contained HTML (CSP
+  `default-src 'none'; style-src 'unsafe-inline'`, zero scripts, zero
+  external references). Generation is staged and atomic with SHA-256
+  recorded on an immutable artifact row; destinations are never
+  overwritten; blank narratives render an explicit unknown-rule instead of
+  invented text.
+- **Disclosure projection** (`redact.rs`): ordered typed rules (omit_field,
+  mask_field with one fixed token, replace_exact, bounded linear-time
+  replace_regex, deterministic labeled pseudonymize), default-closed
+  posture (provenance paths omitted unless widened; deny beats allow),
+  every application counted and the counts rendered into the artifact.
+  **The preview is produced by the same projection as the final bytes and
+  the equality is asserted by test.**
+- **Portable case bundles** (`.logscope-case`): deterministic ZIP (fixed
+  timestamps, stable order) with an exhaustive manifest, projected case
+  metadata, evidence JSONL, saved queries, optional previously generated
+  reports, and a bounded parquet subset of referenced records (never under
+  a disclosure profile). Import validates everything before writing:
+  platform-independent path hardening (traversal, drive/ADS colons,
+  reserved device names, depth/length/collision), inflate-past-declared
+  cutoffs, checksum and version gates — then builds a NEW isolated
+  workspace via staging + rename. Bundled reports land as inert files;
+  the parquet subset is not registered as a queryable dataset, and
+  verification in the destination honestly reports
+  `dataset_revision_unavailable` rather than pretending `verified`.
+- **Crash recovery for generation records**: workspace open finishes
+  `running` report-artifact and bundle-export rows as failed
+  (`job/interrupted`) — completed tombstones, never deleted.
+- **Stable error-code registry**: 120 codes asserted in one place
+  (`crates/logscope-app/tests/error_codes.rs`) with a source scan proving
+  observed == registered in both directions.
+- **Measured v0.3 baseline** (5M records, 1,000 evidence) in
+  `docs/benchmarks/2026-08-05-v0.3-case-baseline.md`: verify 1,001
+  evidence in 1.10 s with one dataset lookup; timeline 4 ms; report
+  62 ms; bundle export 2.9 s including the parquet subset; honest
+  cancellation-latency numbers (p50 ~0.7 s, phase-bounded) recorded as a
+  known property.
+
+### Fixed
+- **Disclosure posture could be widened by a positional JSON array**
+  (caught by the v0.3 test sweep): serde's derived struct deserializer
+  also accepts `["include"]`, which would have silently set the path
+  policy. Posture JSON must now be an object; anything else is a
+  structured `redaction/invalid-profile` refusal.
+- **Bundle round trip dropped hypothesis links and states** (caught by the
+  new end-to-end test): exported bundles now carry each hypothesis's
+  linked evidence ids and state; import restores them after evidence
+  insertion — a link to evidence the bundle does not contain is refused,
+  and a state that does not parse stays `unverified` (the import never
+  upgrades a claim it cannot read). Older bundles import unchanged.
+
+### Unchanged / preserved
+- Canonical data is never mutated by investigations, reports, redaction,
+  or bundles; source files are never modified; no network path exists at
+  runtime; releases remain unsigned by policy (ADR-0018); both Windows
+  artifacts continue to carry one byte-identical payload.
+
 ## 0.2.2 — 2026-08-04
 
 **The first release whose user interface actually loads, and the first to

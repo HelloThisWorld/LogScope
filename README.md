@@ -23,8 +23,10 @@ you choose. Nothing is signed, so Windows may display an Unknown Publisher or
 SmartScreen warning. Download only from the official release above and verify
 the `.sha256` sidecar published alongside each artifact.
 
-**Status: 0.2.2 — early development.** LogScope is not feature complete and is
-not a 1.0 product. Only the Log Explorer half of one profile works today; see
+**Status: 0.3.0 — early development.** LogScope is not feature complete and is
+not a 1.0 product. One profile now covers the interactive Log Explorer plus the
+investigation workbench (investigations, pinned evidence, timeline, reports,
+disclosure profiles, portable case bundles); see
 [Product profiles](#product-profiles) for exactly what is and is not available.
 
 LogScope is an open-source, Windows-first, fully offline, local-first telemetry
@@ -44,7 +46,7 @@ The setup executable embeds that exact ZIP byte-for-byte, and packaging fails
 closed if the two ever diverge, so the resulting application tree is identical
 either way.
 
-The current source version is `0.2.2`. See the
+The current source version is `0.3.0`. See the
 [latest official Release](https://github.com/HelloThisWorld/LogScope/releases/latest)
 for the published asset list and checksum.
 
@@ -63,9 +65,14 @@ LogScope has two, and only two, planned public product profiles. Their current
 state is:
 
 1. **Offline Log Case** — investigate exported or supplied logs without
-   requiring metrics or traces. **Partially available.** Import and the
-   interactive Log Explorer work; deterministic analysis, investigations,
-   reports, case bundles and the bounded Agent interface are not built yet.
+   requiring metrics or traces. **Partially available.** Import, the
+   interactive Log Explorer, and the investigation workbench work:
+   investigations with hypotheses and typed items, evidence pinned from the
+   Explorer with verifiable integrity states, an investigation timeline,
+   deterministic Markdown/HTML reports behind a disclosure preview, and
+   portable case bundles that round-trip offline. Deterministic analysis
+   (pattern mining, clustering, findings) and the bounded Agent interface
+   are not built yet.
 2. **Local OTel Session** — ingest local OpenTelemetry logs, metrics and traces
    into the same durable workspace. **Not available.** The OTLP receiver in the
    tree is an experimental spike (ADR-0009): disabled by default, loopback-only,
@@ -77,7 +84,7 @@ Adding a signal later will not require recreating a workspace.
 
 ## Core features
 
-Available today at 0.2.2:
+Available today at 0.3.0:
 
 - import of generic JSONL, CSV, and Elasticsearch/ECS JSONL log exports through
   a versioned, declarative import-profile boundary;
@@ -100,12 +107,37 @@ Available today at 0.2.2:
   order, with truncation marking, overwrite protection, cancellation cleanup and
   a spreadsheet formula-injection guard;
 - durable, cancellable, resumable jobs for import and index rebuild, with
-  interrupted work discarded rather than half-applied on reopen.
+  interrupted work discarded rather than half-applied on reopen;
+- **investigations** with hypotheses (manual states, linked evidence), notes,
+  tasks, findings and questions — everything revisioned with non-destructive
+  history and optimistic-concurrency conflict reporting;
+- **evidence pinning** from the Explorer (single events, bounded selections,
+  queries, saved searches, facet groups, histogram intervals, items): each pin
+  stores a versioned typed reference plus a bounded captured snapshot, and
+  batched verification reports honest integrity states (verified, drifted,
+  changed, missing, unavailable — never silently rewritten) without N+1
+  queries;
+- an **investigation timeline** merging dated evidence and manual markers,
+  preserving original timezone text, with an explicit undated section that
+  states each entry's reason;
+- **deterministic reports** (Markdown and self-contained HTML with a locked-down
+  CSP, zero scripts and zero network references), generated atomically with
+  recorded checksums; the redaction preview is produced by the same projection
+  as the final bytes;
+- **disclosure profiles**: ordered typed redaction rules (omit, mask, exact and
+  bounded-regex replacement, deterministic labeled pseudonyms) and a
+  default-closed posture (provenance paths omitted unless widened), with every
+  removal counted and the counts rendered into the artifact;
+- **portable case bundles**: deterministic ZIP export with an exhaustive
+  manifest, an optional bounded parquet subset of referenced records, and a
+  hostile-import path (traversal/collision/bomb/checksum/version validation
+  before anything is written) that lands in a new isolated workspace;
+- crash recovery that completes interrupted report/bundle records as honest
+  failed tombstones instead of deleting them.
 
-Not built yet: deterministic analysis and findings, investigations and evidence
-UX, timelines, reports, portable case bundles, redaction and disclosure
-projection, metrics, traces, dashboards, the machine CLI, the Agent Query API,
-the extension registry, backup and restore, integrity scanning and safe mode.
+Not built yet: deterministic analysis and findings, metrics, traces,
+dashboards, the machine CLI, the Agent Query API, the extension registry,
+backup and restore, integrity scanning and safe mode.
 See [known limitations](docs/development/v1.0-implementation-plan.md).
 
 ## Portable mode
@@ -135,7 +167,7 @@ cargo test --workspace --exclude logscope-desktop
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cd apps/desktop; npm install; npm run tauri dev
-pwsh scripts/package-portable.ps1 -Version 0.2.2
+pwsh scripts/package-portable.ps1 -Version 0.3.0
 ```
 
 Benchmarks use deterministic ChaCha8 corpora that are generated on demand and
@@ -171,7 +203,13 @@ nothing can be: there is no outbound network path in the product.
   source locators, and no synthetic spans or timestamps are fabricated;
 - deterministic re-imports — identical source plus identical parser, profile and
   normalizer versions produce identical canonical values and record hashes;
-- no operating-system identity is captured anywhere, asserted by test.
+- no operating-system identity is captured anywhere, asserted by test;
+- content leaves the workspace only through explicit artifacts: reports and
+  case bundles are generated on demand behind a disclosure preview that IS the
+  final bytes, every redaction is counted into the artifact so an omission can
+  never look like completeness, and bundle import validates hostile archives
+  (path traversal, collisions, bombs, checksums, versions) before writing
+  anything.
 
 There is no built-in AI, model runtime or remote inference, and no Model Context
 Protocol server, adapter or dependency. These are excluded by standing product
@@ -206,7 +244,7 @@ component licenses.
 
 ## Status
 
-Architecture decisions live in [docs/adr/](docs/adr/) (0001–0017). Milestone
+Architecture decisions live in [docs/adr/](docs/adr/) (0001–0019). Milestone
 plans, acceptance matrices and the current blocker chain live in
 [docs/development/](docs/development/); the newest is the
 [v1.0 preflight record](docs/development/v1.0-implementation-plan.md), which
