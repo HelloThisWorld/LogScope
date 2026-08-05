@@ -33,6 +33,9 @@ sha2.workspace = true
 regex = "1"
 # Case-bundle container (same crate/features as logscope-ingest).
 zip = { version = "8", default-features = false, features = ["deflate"] }
+# Same pinned build as logscope-query (typed params for derived-data
+# writes through the shared engine connection).
+duckdb = { version = "1.10505.0", features = ["bundled", "json", "parquet"] }
 
 [dev-dependencies]
 tempfile.workspace = true

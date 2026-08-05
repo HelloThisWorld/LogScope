@@ -27,7 +27,9 @@ use logscope_workspace::{NewHypothesis, NewInvestigation, NewMarker, Workspace, 
 
 /// Every stable error code, sorted. This list IS the contract.
 const REGISTRY: &[&str] = &[
+    "analysis/derived",
     "analysis/invalid-definition",
+    "analysis/stale-run",
     "analysis/unsupported-version",
     "bundle/data",
     "bundle/data-too-large",

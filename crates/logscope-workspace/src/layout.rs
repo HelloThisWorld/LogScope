@@ -66,6 +66,11 @@ impl WorkspaceLayout {
     pub fn staging_job_dir(&self, job_id: &str) -> PathBuf {
         self.staging_dir().join(job_id)
     }
+    /// Rebuildable derived analysis data, one directory per run
+    /// (v0.4; disposable without losing canonical data).
+    pub fn derived_analysis_dir(&self, run_id: &str) -> PathBuf {
+        self.root.join("derived").join("analysis").join(run_id)
+    }
 
     /// Creates every directory of the layout.
     pub fn ensure_dirs(&self) -> Result<(), WorkspaceError> {
