@@ -546,4 +546,39 @@ export const api = {
       newWorkspaceRoot,
       workspaceName,
     }),
+
+  // ---- v0.4 pattern analysis ----
+  listAnalysisDefinitions: () =>
+    invoke<AnalysisDefinitionDto[]>("list_analysis_definitions"),
+  createPatternDefinition: (dto: NewPatternDefinitionDto) =>
+    invoke<AnalysisDefinitionDto>("create_pattern_definition", { new: dto }),
+  listAnalysisRuns: (definitionId?: string) =>
+    invoke<AnalysisRunDto[]>("list_analysis_runs", {
+      definitionId: definitionId ?? null,
+    }),
+  checkAnalysisRun: (runId: string) =>
+    invoke<string | null>("check_analysis_run", { runId }),
+  startPatternAnalysis: (definitionId: string) =>
+    invoke<AnalysisStartedDto>("start_pattern_analysis", { definitionId }),
+  listPatterns: (runId: string, offset: number, limit: number) =>
+    invoke<PatternSummaryDto[]>("list_patterns", { runId, offset, limit }),
+  patternRecords: (runId: string, patternId: string, limit: number) =>
+    invoke<LogRowV2Dto[]>("pattern_records", { runId, patternId, limit }),
 };
+
+// ---- v0.4 pattern analysis types --------------------------------------
+
+import type { AnalysisDefinitionDto } from "./bindings/AnalysisDefinitionDto";
+import type { NewPatternDefinitionDto } from "./bindings/NewPatternDefinitionDto";
+import type { AnalysisRunDto } from "./bindings/AnalysisRunDto";
+import type { AnalysisStartedDto } from "./bindings/AnalysisStartedDto";
+import type { PatternSummaryDto } from "./bindings/PatternSummaryDto";
+
+export type {
+  AnalysisDefinitionDto,
+  NewPatternDefinitionDto,
+  AnalysisRunDto,
+  AnalysisStartedDto,
+  PatternSummaryDto,
+};
+export type { AnalysisFinishedDto } from "./bindings/AnalysisFinishedDto";

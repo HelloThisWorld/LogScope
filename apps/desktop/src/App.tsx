@@ -7,6 +7,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { api, errorText } from "./api";
 import type { OverviewDto, RestoreContextDto, WorkspaceInfoDto } from "./api";
 import Explorer from "./Explorer";
+import Patterns from "./Patterns";
 import CaseView from "./Case";
 
 type JobEventPayload = {
@@ -42,7 +43,9 @@ export default function App() {
   >("jsonl");
   const [activeJob, setActiveJob] = useState<string | null>(null);
   const [jobLine, setJobLine] = useState<string>("");
-  const [view, setView] = useState<"home" | "explorer" | "case">("home");
+  const [view, setView] = useState<"home" | "explorer" | "case" | "patterns">(
+    "home",
+  );
   const [pendingRestore, setPendingRestore] =
     useState<RestoreContextDto | null>(null);
   const importFinishedRef = useRef<() => void>(() => {});
@@ -190,6 +193,20 @@ export default function App() {
     );
   }
 
+  if (view === "patterns" && workspace) {
+    return (
+      <main className="main-wide">
+        {error && <div className="error">{error}</div>}
+        <Patterns
+          onBack={() => {
+            setView("home");
+            void refreshOverview();
+          }}
+        />
+      </main>
+    );
+  }
+
   if (view === "case" && workspace) {
     return (
       <main className="main-wide">
@@ -312,6 +329,16 @@ export default function App() {
               </button>
               <button onClick={() => setView("case")} disabled={!!activeJob}>
                 Investigations
+              </button>
+              <button
+                onClick={() => setView("patterns")}
+                disabled={
+                  !overview?.datasets.some(
+                    (d) => d.signal === "logs" && d.status === "published",
+                  ) || !!activeJob
+                }
+              >
+                Patterns
               </button>
               <button onClick={doClose}>Close workspace</button>
               <button onClick={refreshOverview}>Refresh</button>
