@@ -2619,6 +2619,7 @@ dependencies = [
  "blake3",
  "chrono",
  "crossbeam-channel",
+ "duckdb",
  "flate2",
  "logscope-case",
  "logscope-ingest",

@@ -10,6 +10,8 @@
 pub mod analysis;
 pub mod envelope;
 pub mod ids;
+pub mod stack;
+pub mod template;
 pub mod vocab;
 
 pub use ids::new_id;

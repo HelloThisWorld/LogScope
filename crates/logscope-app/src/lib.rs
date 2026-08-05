@@ -11,6 +11,7 @@ pub mod dto;
 pub mod explorer;
 pub mod export;
 pub mod import;
+pub mod patterns;
 pub mod redact;
 pub mod report;
 pub mod timeline;
