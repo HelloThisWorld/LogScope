@@ -178,6 +178,34 @@ string_enum! {
     }
 }
 
+string_enum! {
+    /// Deterministic analysis kinds (v0.4). Each kind has its own
+    /// algorithm/rule versions; new kinds extend the definition schema
+    /// version rather than reinterpreting these.
+    AnalysisKind, expected = "message_pattern|stack_fingerprint|comparison|correlation|finding_rules" {
+        MessagePattern => "message_pattern",
+        StackFingerprint => "stack_fingerprint",
+        Comparison => "comparison",
+        Correlation => "correlation",
+        FindingRules => "finding_rules",
+    }
+}
+
+string_enum! {
+    /// Analysis run lifecycle. `completed` is the only usable-result
+    /// state; `stale` applies only to completed runs whose inputs later
+    /// changed (history preserved). Cancellation and failure are never
+    /// representable as an empty success.
+    AnalysisRunState, expected = "pending|running|completed|cancelled|failed|stale" {
+        Pending => "pending",
+        Running => "running",
+        Completed => "completed",
+        Cancelled => "cancelled",
+        Failed => "failed",
+        Stale => "stale",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

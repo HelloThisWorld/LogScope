@@ -658,9 +658,14 @@ fn v2_workspace_migrates_to_v3_without_touching_existing_data() {
         .unwrap();
     }
 
-    // Opening with the v0.3 build migrates transactionally to v3.
+    // Opening with the current build migrates transactionally to the
+    // latest supported schema (the intent is "v2 data survives the full
+    // chain", not a literal version — same rule as the pre_v02 test).
     let db = MetaDb::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 3);
+    assert_eq!(
+        db.schema_version().unwrap(),
+        logscope_workspace::db::supported_schema_version()
+    );
 
     // Existing v2 data is untouched and still readable.
     let ds = db.get_dataset("ds-v2").unwrap().unwrap();

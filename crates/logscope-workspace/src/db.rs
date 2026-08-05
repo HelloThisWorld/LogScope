@@ -21,6 +21,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "0003_investigations",
         include_str!("migrations/0003_investigations.sql"),
     ),
+    (
+        4,
+        "0004_analysis",
+        include_str!("migrations/0004_analysis.sql"),
+    ),
 ];
 
 /// Highest schema version this build can open.
