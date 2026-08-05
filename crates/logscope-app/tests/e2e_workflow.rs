@@ -439,6 +439,55 @@ fn full_case_lifecycle_import_to_bundle_reimport() {
         "every evidence row states the honest resolver outcome"
     );
 
+    // ---- a NEW report can be authored in the imported workspace from
+    // the captured snapshots (definitions do not travel; authorship
+    // does). The evidence renders from snapshot capture and the report
+    // states the resolver's honest integrity labels.
+    let evidence2 = ws2.meta.list_evidence(&inv.investigation_id, true).unwrap();
+    let selected2: Vec<serde_json::Value> = evidence2
+        .iter()
+        .map(|e| serde_json::json!({"id": e.evidence_id, "revision": e.revision}))
+        .collect();
+    let def2 = ws2
+        .meta
+        .create_report_def(&NewReportDef {
+            report_def_id: "rep-imported".into(),
+            investigation_id: inv.investigation_id.clone(),
+            title: "authored after import".into(),
+            subtitle: None,
+            sections_json: serde_json::json!([
+                {"kind": "summary", "content": "written in the destination"},
+                {"kind": "timeline"},
+                {"kind": "evidence"},
+            ])
+            .to_string(),
+            selected_evidence_json: serde_json::to_string(&selected2).unwrap(),
+            selected_markers_json: serde_json::json!([
+                {"id": markers2[0].marker_id, "revision": markers2[0].revision}
+            ])
+            .to_string(),
+            options_json: "{}".into(),
+        })
+        .unwrap();
+    let imported_report = new_root.join("out").join("imported-report.md");
+    let art2 = report::generate_report(
+        &ws2,
+        &def2.report_def_id,
+        report::ReportFormat::Markdown,
+        &imported_report,
+    )
+    .expect("a report generates in the imported workspace");
+    assert_eq!(art2.status, "completed");
+    let report_text = std::fs::read_to_string(&imported_report).unwrap();
+    assert!(
+        report_text.contains("orders deploy"),
+        "the imported marker renders"
+    );
+    assert!(
+        report_text.contains("event 0"),
+        "imported evidence renders from its captured snapshot"
+    );
+
     // The original workspace reopens clean: the whole flow left no
     // tombstones behind.
     drop(ws);

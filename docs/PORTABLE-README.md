@@ -4,9 +4,11 @@ LogScope is a local-first telemetry investigation tool that makes no network
 requests while running.
 
 **Early development.** LogScope is not feature complete and is not a 1.0
-product. Import and the interactive Log Explorer work; deterministic analysis,
-investigations, reports, case bundles, metrics, traces, dashboards, the CLI and
-the Agent API are not built yet. See the project README for the full list.
+product. Import, the interactive Log Explorer, and the investigation workbench
+(investigations, pinned evidence, timeline, deterministic reports behind a
+disclosure preview, portable case bundles) work; deterministic analysis,
+metrics, traces, dashboards, the CLI and the Agent API are not built yet. See
+the project README for the full list.
 
 ## Running
 
