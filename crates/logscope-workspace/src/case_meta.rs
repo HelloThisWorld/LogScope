@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::WorkspaceError;
 use crate::meta::MetaDb;
 
-fn now() -> String {
+pub(crate) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
@@ -395,7 +395,7 @@ pub struct ReportArtifactRow {
 // The arguments mirror the case_history columns one-to-one; a params
 // struct would only rename the same eight fields.
 #[allow(clippy::too_many_arguments)]
-fn record_history(
+pub(crate) fn record_history(
     tx: &Transaction<'_>,
     investigation_id: Option<&str>,
     entity_kind: &str,
@@ -424,13 +424,13 @@ fn record_history(
     Ok(())
 }
 
-fn payload<T: Serialize>(row: &T) -> Result<String, WorkspaceError> {
+pub(crate) fn payload<T: Serialize>(row: &T) -> Result<String, WorkspaceError> {
     Ok(serde_json::to_string(row)?)
 }
 
 /// Distinguishes "someone else changed it" from "it does not exist" after
 /// a guarded UPDATE affected zero rows.
-fn stale_or_missing(
+pub(crate) fn stale_or_missing(
     tx: &Transaction<'_>,
     table: &str,
     id_col: &str,

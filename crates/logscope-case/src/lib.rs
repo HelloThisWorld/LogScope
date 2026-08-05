@@ -7,6 +7,7 @@
 //! deliberately has no database, DuckDB, or UI dependency so it remains
 //! viable for the future macOS target.
 
+pub mod analysis;
 pub mod envelope;
 pub mod ids;
 pub mod vocab;

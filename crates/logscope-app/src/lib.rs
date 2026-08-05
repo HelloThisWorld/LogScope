@@ -4,6 +4,7 @@
 //! shell, future CLI, and Agent API all call these services so UI and
 //! automation share exactly the same semantics.
 
+pub mod analysis;
 pub mod bundle;
 pub mod case;
 pub mod dto;

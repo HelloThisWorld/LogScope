@@ -20,8 +20,9 @@ pub struct RecoveryReport {
     pub interrupted_jobs: Vec<String>,
     /// Staging-status datasets with no published segments, deleted.
     pub discarded_staging_datasets: Vec<String>,
-    /// Report-artifact / bundle-export records found `running` and
-    /// finished as failed (`kind:id`) — honest tombstones, never deleted.
+    /// Report-artifact / bundle-export / analysis-run records found
+    /// unfinished and completed as failed (`kind:id`) — honest
+    /// tombstones, never deleted.
     #[serde(default)]
     pub interrupted_case_records: Vec<String>,
 }
@@ -121,10 +122,19 @@ impl Workspace {
     /// 4. `staging`-status datasets without segments are deleted;
     /// 5. `running` report-artifact / bundle-export records are finished
     ///    as failed (`job/interrupted`) — the tombstone is completed,
-    ///    never deleted, so an interrupted generation stays on record.
+    ///    never deleted, so an interrupted generation stays on record;
+    /// 6. `pending`/`running` analysis runs are finished the same way
+    ///    (`analysis_run:<id>` entries in the same recovery field).
     fn recover_interrupted_state(&self) -> Result<RecoveryReport, WorkspaceError> {
+        let mut interrupted = self.meta.fail_interrupted_case_records()?;
+        interrupted.extend(
+            self.meta
+                .fail_interrupted_analysis_runs()?
+                .into_iter()
+                .map(|id| format!("analysis_run:{id}")),
+        );
         let mut report = RecoveryReport {
-            interrupted_case_records: self.meta.fail_interrupted_case_records()?,
+            interrupted_case_records: interrupted,
             ..RecoveryReport::default()
         };
 

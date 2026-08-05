@@ -27,6 +27,8 @@ use logscope_workspace::{NewHypothesis, NewInvestigation, NewMarker, Workspace, 
 
 /// Every stable error code, sorted. This list IS the contract.
 const REGISTRY: &[&str] = &[
+    "analysis/invalid-definition",
+    "analysis/unsupported-version",
     "bundle/data",
     "bundle/data-too-large",
     "bundle/destination-exists",
@@ -202,7 +204,7 @@ fn every_code_in_source_is_registered_and_every_registered_code_exists() {
     assert!(files.len() > 40, "the scan must actually find the sources");
 
     let extract = regex::Regex::new(
-        r#""((?:workspace|case|report|bundle|redaction|job|import|export|query|parse|ingest|otlp|lang|store)/[a-z0-9-]+)""#,
+        r#""((?:analysis|workspace|case|report|bundle|redaction|job|import|export|query|parse|ingest|otlp|lang|store)/[a-z0-9-]+)""#,
     )
     .unwrap();
     let mut observed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
