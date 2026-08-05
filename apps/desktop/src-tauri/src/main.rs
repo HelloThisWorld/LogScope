@@ -8,6 +8,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod analysis_cmds;
 mod case_cmds;
 mod explorer_cmds;
 
@@ -420,7 +421,14 @@ fn main() {
             case_cmds::preview_report,
             case_cmds::export_case_bundle,
             case_cmds::list_bundle_exports,
-            case_cmds::import_case_bundle
+            case_cmds::import_case_bundle,
+            analysis_cmds::list_analysis_definitions,
+            analysis_cmds::create_pattern_definition,
+            analysis_cmds::list_analysis_runs,
+            analysis_cmds::check_analysis_run,
+            analysis_cmds::start_pattern_analysis,
+            analysis_cmds::list_patterns,
+            analysis_cmds::pattern_records
         ])
         .run(tauri::generate_context!())
         .expect("error while running LogScope");

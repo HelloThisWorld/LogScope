@@ -156,7 +156,7 @@ pub(crate) fn severity_band_name(number: Option<i32>, text: Option<&str>) -> Opt
     }
 }
 
-fn row_dto(r: &LogRow) -> LogRowV2Dto {
+pub(crate) fn row_dto(r: &LogRow) -> LogRowV2Dto {
     LogRowV2Dto {
         record_id: r.record_id.clone(),
         event_time: r.event_time,

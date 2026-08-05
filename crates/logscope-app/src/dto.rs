@@ -1049,3 +1049,106 @@ pub struct RestoreContextDto {
     /// Item pins: the referenced workspace item.
     pub item_id: Option<String>,
 }
+
+// ---- v0.4 Analysis boundary (patterns) --------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AnalysisDefinitionDto {
+    pub definition_id: String,
+    pub kind: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub dataset_ids: Vec<String>,
+    pub query_text: String,
+    pub algorithm_id: String,
+    #[ts(type = "number")]
+    pub algorithm_version: i64,
+    pub field_selection_json: String,
+    pub config_json: String,
+    pub masking_profile_json: String,
+    pub limits_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[ts(type = "number")]
+    pub revision: i64,
+}
+
+/// Creation payload for the two pattern-analysis kinds. `stack_field`
+/// is required when `kind` is `stack_fingerprint`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NewPatternDefinitionDto {
+    pub kind: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub dataset_ids: Vec<String>,
+    pub query_text: String,
+    pub stack_field: Option<String>,
+    pub masking_profile_json: String,
+    pub config_json: String,
+    pub limits_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AnalysisRunDto {
+    pub run_id: String,
+    pub definition_id: String,
+    #[ts(type = "number")]
+    pub definition_revision: i64,
+    pub semantic_fingerprint: String,
+    pub state: String,
+    pub dataset_revs_json: String,
+    pub bounds_json: String,
+    pub counts_json: String,
+    pub warnings_json: String,
+    pub manifest_json: Option<String>,
+    pub error_json: Option<String>,
+    pub invalidation_reason: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PatternSummaryDto {
+    pub pattern_id: String,
+    pub kind: String,
+    pub template: String,
+    pub exception_type: Option<String>,
+    #[ts(type = "number")]
+    pub count: i64,
+    #[ts(type = "number")]
+    pub untimestamped: i64,
+    #[ts(type = "number | null")]
+    pub first_seen: Option<i64>,
+    #[ts(type = "number | null")]
+    pub last_seen: Option<i64>,
+    #[ts(type = "number | null")]
+    pub peak_bucket_start: Option<i64>,
+    #[ts(type = "number")]
+    pub peak_bucket_count: i64,
+    pub buckets_truncated: bool,
+    pub services_truncated: bool,
+    pub parse_quality: Option<String>,
+    pub services_json: String,
+    pub examples_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AnalysisStartedDto {
+    pub job_id: String,
+    pub definition_id: String,
+}
+
+/// Terminal event for a pattern-analysis job (`analysis-finished`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AnalysisFinishedDto {
+    pub job_id: String,
+    pub definition_id: String,
+    pub run: Option<AnalysisRunDto>,
+    pub error: Option<ErrorDto>,
+}
