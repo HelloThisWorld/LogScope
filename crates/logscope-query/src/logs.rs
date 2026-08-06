@@ -62,6 +62,12 @@ pub struct LogRow {
     pub line_start: Option<u64>,
     pub attributes_json: String,
     pub provenance_json: String,
+    /// Canonical generic fields: present only when the import profile
+    /// mapped them. `None` is "the source never carried this field",
+    /// which analysis must report as an exclusion, never as a value.
+    pub operation: Option<String>,
+    pub outcome: Option<String>,
+    pub event_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,7 +203,8 @@ pub fn query_log_page(
     let sql = format!(
         "SELECT record_id, event_time, severity_text, severity_number, display_message,
                 resource_id, trace_id, span_id, dataset_id, source_id,
-                record_number, line_start, attributes_json, provenance_json
+                record_number, line_start, attributes_json, provenance_json,
+                operation, outcome, event_name
          FROM {files}
          {where_sql}
          ORDER BY event_time NULLS LAST, record_id
@@ -228,6 +235,9 @@ pub fn query_log_page(
                 line_start: r.get(11)?,
                 attributes_json: r.get(12)?,
                 provenance_json: r.get(13)?,
+                operation: r.get(14)?,
+                outcome: r.get(15)?,
+                event_name: r.get(16)?,
             })
         })?;
         for row in mapped {

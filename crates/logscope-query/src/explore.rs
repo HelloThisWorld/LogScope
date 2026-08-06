@@ -201,7 +201,8 @@ pub struct QueryPage {
 
 const LOG_COLUMNS: &str = "record_id, event_time, severity_text, severity_number, \
      display_message, resource_id, trace_id, span_id, dataset_id, source_id, \
-     record_number, line_start, attributes_json, provenance_json";
+     record_number, line_start, attributes_json, provenance_json, \
+     operation, outcome, event_name";
 
 fn map_log_row(r: &duckdb::Row<'_>) -> Result<LogRow, duckdb::Error> {
     Ok(LogRow {
@@ -219,6 +220,9 @@ fn map_log_row(r: &duckdb::Row<'_>) -> Result<LogRow, duckdb::Error> {
         line_start: r.get(11)?,
         attributes_json: r.get(12)?,
         provenance_json: r.get(13)?,
+        operation: r.get(14)?,
+        outcome: r.get(15)?,
+        event_name: r.get(16)?,
     })
 }
 
@@ -948,7 +952,7 @@ pub fn fetch_record_detail(
         return Ok(None);
     }
     let sql = format!(
-        "SELECT {LOG_COLUMNS}, scope_id, body_json, event_name, \
+        "SELECT {LOG_COLUMNS}, scope_id, body_json, \
                 original_timestamp_text, timezone_assumption_json, observed_time \
          FROM {files} WHERE dataset_id = ? AND record_id = ? LIMIT 1",
         files = files_expr(files),
@@ -959,14 +963,15 @@ pub fn fetch_record_detail(
         let mut stmt = conn.prepare(&sql)?;
         let mut rows = stmt
             .query_map(duckdb::params![dataset_id, record_id], |r| {
+                let row = map_log_row(r)?;
                 Ok(RecordDetail {
-                    row: map_log_row(r)?,
-                    scope_id: r.get(14)?,
-                    body_json: r.get(15)?,
-                    event_name: r.get(16)?,
-                    original_timestamp_text: r.get(17)?,
-                    timezone_assumption_json: r.get(18)?,
-                    observed_time: r.get(19)?,
+                    event_name: row.event_name.clone(),
+                    row,
+                    scope_id: r.get(17)?,
+                    body_json: r.get(18)?,
+                    original_timestamp_text: r.get(19)?,
+                    timezone_assumption_json: r.get(20)?,
+                    observed_time: r.get(21)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
