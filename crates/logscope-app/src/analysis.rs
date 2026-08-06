@@ -161,6 +161,35 @@ pub fn begin_run(ws: &Workspace, definition_id: &str) -> Result<AnalysisRunRow, 
     let dataset_ids: Vec<String> =
         serde_json::from_str(&def.dataset_selection_json).unwrap_or_default();
     let selection = explorer::resolve_dataset_selection(ws, &dataset_ids).map_err(ws_err)?;
+    let strategy: TimeStrategy = serde_json::from_str(&def.time_strategy_json)
+        .map_err(|e| invalid(format!("stored time strategy does not parse: {e}")))?;
+    let latest = explorer::latest_event_time(ws, &selection).map_err(ws_err)?;
+    let window = resolve_window(&strategy, latest);
+    let bounds = serde_json::json!({ "start": window.start, "end": window.end });
+    freeze_and_start(ws, &def, selection, bounds)
+}
+
+/// Same freeze, but with caller-supplied concrete bounds — comparison
+/// runs carry BOTH windows in `bounds_json`, already resolved, and must
+/// never be re-resolved against a moving "latest event".
+pub fn begin_run_with_bounds(
+    ws: &Workspace,
+    definition_id: &str,
+    bounds: serde_json::Value,
+) -> Result<AnalysisRunRow, JobError> {
+    let def = load_definition(ws, definition_id)?;
+    let dataset_ids: Vec<String> =
+        serde_json::from_str(&def.dataset_selection_json).unwrap_or_default();
+    let selection = explorer::resolve_dataset_selection(ws, &dataset_ids).map_err(ws_err)?;
+    freeze_and_start(ws, &def, selection, bounds)
+}
+
+fn freeze_and_start(
+    ws: &Workspace,
+    def: &AnalysisDefinitionRow,
+    selection: Vec<String>,
+    bounds: serde_json::Value,
+) -> Result<AnalysisRunRow, JobError> {
     if selection.is_empty() {
         return Err(JobError::new(
             "case/empty-scope",
@@ -182,12 +211,6 @@ pub fn begin_run(ws: &Workspace, definition_id: &str) -> Result<AnalysisRunRow, 
         };
         Some(resolved.fingerprint.clone())
     };
-
-    let strategy: TimeStrategy = serde_json::from_str(&def.time_strategy_json)
-        .map_err(|e| invalid(format!("stored time strategy does not parse: {e}")))?;
-    let latest = explorer::latest_event_time(ws, &selection).map_err(ws_err)?;
-    let window = resolve_window(&strategy, latest);
-    let bounds = serde_json::json!({ "start": window.start, "end": window.end });
 
     let mut dataset_revs: Vec<(String, String)> = Vec::with_capacity(selection.len());
     for id in &selection {

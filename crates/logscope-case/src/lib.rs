@@ -8,6 +8,7 @@
 //! viable for the future macOS target.
 
 pub mod analysis;
+pub mod comparison;
 pub mod envelope;
 pub mod ids;
 pub mod stack;
