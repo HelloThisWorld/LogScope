@@ -564,6 +564,24 @@ export const api = {
     invoke<PatternSummaryDto[]>("list_patterns", { runId, offset, limit }),
   patternRecords: (runId: string, patternId: string, limit: number) =>
     invoke<LogRowV2Dto[]>("pattern_records", { runId, patternId, limit }),
+
+  // ---- v0.4 window comparison ----
+  createComparisonDefinition: (dto: NewComparisonDefinitionDto) =>
+    invoke<AnalysisDefinitionDto>("create_comparison_definition", { new: dto }),
+  startComparisonAnalysis: (definitionId: string) =>
+    invoke<AnalysisStartedDto>("start_comparison_analysis", { definitionId }),
+  listComparisonResults: (runId: string, offset: number, limit: number) =>
+    invoke<ComparisonResultDto[]>("list_comparison_results", {
+      runId,
+      offset,
+      limit,
+    }),
+  comparisonRecords: (
+    runId: string,
+    key: string,
+    side: "baseline" | "suspect",
+    limit: number,
+  ) => invoke<LogRowV2Dto[]>("comparison_records", { runId, key, side, limit }),
 };
 
 // ---- v0.4 pattern analysis types --------------------------------------
@@ -573,6 +591,8 @@ import type { NewPatternDefinitionDto } from "./bindings/NewPatternDefinitionDto
 import type { AnalysisRunDto } from "./bindings/AnalysisRunDto";
 import type { AnalysisStartedDto } from "./bindings/AnalysisStartedDto";
 import type { PatternSummaryDto } from "./bindings/PatternSummaryDto";
+import type { NewComparisonDefinitionDto } from "./bindings/NewComparisonDefinitionDto";
+import type { ComparisonResultDto } from "./bindings/ComparisonResultDto";
 
 export type {
   AnalysisDefinitionDto,
@@ -580,5 +600,7 @@ export type {
   AnalysisRunDto,
   AnalysisStartedDto,
   PatternSummaryDto,
+  NewComparisonDefinitionDto,
+  ComparisonResultDto,
 };
 export type { AnalysisFinishedDto } from "./bindings/AnalysisFinishedDto";

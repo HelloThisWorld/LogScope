@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use logscope_app::dto::*;
-use logscope_app::{analysis, patterns};
+use logscope_app::{analysis, comparison, patterns};
 use logscope_jobs::JobEvent;
 use logscope_query::TimeStrategy;
 use logscope_workspace::{AnalysisDefinitionRow, AnalysisRunRow, Workspace};
@@ -79,6 +79,22 @@ fn summary_dto(s: patterns::PatternSummary) -> PatternSummaryDto {
         parse_quality: s.parse_quality,
         services_json: s.services_json,
         examples_json: s.examples_json,
+    }
+}
+
+fn result_dto(r: comparison::ComparisonResult) -> ComparisonResultDto {
+    ComparisonResultDto {
+        result_id: r.result_id,
+        dimension: r.dimension,
+        key: r.key,
+        classification: r.classification,
+        baseline_count: r.baseline_count as i64,
+        suspect_count: r.suspect_count as i64,
+        count_change: r.count_change,
+        rate_change_bp: r.rate_change_bp,
+        rule_id: r.rule_id,
+        rule_version: r.rule_version,
+        calculation_json: r.calculation_json,
     }
 }
 
@@ -259,6 +275,177 @@ pub fn start_pattern_analysis(
     Ok(AnalysisStartedDto {
         job_id,
         definition_id,
+    })
+}
+
+/// Creates a validated comparison definition. The typed window bounds
+/// and dimension are composed into the config here — the UI never hand
+/// writes analysis JSON — and the config is parsed immediately, so a
+/// reversed, empty, or overlapping pair of windows is refused before
+/// any definition exists rather than at the first run.
+#[tauri::command]
+pub fn create_comparison_definition(
+    state: State<'_, AppState>,
+    new: NewComparisonDefinitionDto,
+) -> CmdResult<AnalysisDefinitionDto> {
+    let ws = ws_handle(&state)?;
+    let mut config = serde_json::json!({
+        "dimension": new.dimension,
+        "baseline_start": new.baseline_start,
+        "baseline_end": new.baseline_end,
+        "suspect_start": new.suspect_start,
+        "suspect_end": new.suspect_end,
+    });
+    if let Some(attribute) = new
+        .attribute
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        config["attribute"] = attribute.into();
+    }
+    if let Some(k) = new.top_k {
+        config["top_k"] = k.into();
+    }
+    let config_json = config.to_string();
+    // Structured refusal now, not after a run row exists.
+    comparison::ComparisonConfig::parse(&config_json).map_err(|e| jerr(&e))?;
+
+    let field_selection_json = match new.dimension.as_str() {
+        "stack_fingerprint" => {
+            let field = new.stack_field.as_deref().unwrap_or("").trim().to_string();
+            if field.is_empty() {
+                return Err(err(
+                    "analysis/invalid-definition",
+                    "the stack_fingerprint dimension requires the attribute holding the stack text",
+                ));
+            }
+            serde_json::json!({ "stack_field": field }).to_string()
+        }
+        _ => "{}".to_string(),
+    };
+    analysis::create_definition(
+        &ws,
+        &analysis::NewDefinitionRequest {
+            kind: "comparison".into(),
+            name: new.name,
+            description: new.description,
+            dataset_ids: new.dataset_ids,
+            query_text: new.query_text,
+            time_strategy: TimeStrategy::All,
+            field_selection_json,
+            algorithm_id: logscope_case::comparison::COMPARISON_RULE_ID.into(),
+            algorithm_version: logscope_case::comparison::COMPARISON_RULE_VERSION,
+            config_json,
+            masking_profile_json: if new.masking_profile_json.trim().is_empty() {
+                "{}".into()
+            } else {
+                new.masking_profile_json
+            },
+            thresholds_json: if new.thresholds_json.trim().is_empty() {
+                "{}".into()
+            } else {
+                new.thresholds_json
+            },
+            limits_json: "{}".into(),
+        },
+    )
+    .map(def_dto)
+    .map_err(|e| jerr(&e))
+}
+
+/// Starts a comparison job on the same job/cancel/terminal-event
+/// machinery as pattern analysis.
+#[tauri::command]
+pub fn start_comparison_analysis(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    definition_id: String,
+) -> CmdResult<AnalysisStartedDto> {
+    let ws = ws_handle(&state)?;
+    let job_id = format!("job-{}", uuid::Uuid::new_v4());
+    let (tx, rx) = crossbeam_channel::unbounded::<JobEvent>();
+    let event_app = app.clone();
+    std::thread::spawn(move || {
+        for event in rx.iter() {
+            let _ = event_app.emit("job-event", &event);
+        }
+    });
+
+    let engine =
+        logscope_query::EngineConnection::open_in_memory().map_err(|e| err(e.code(), e))?;
+    let ws_job: Arc<Workspace> = ws.clone();
+    let def_job = definition_id.clone();
+    let handle = logscope_jobs::spawn_job(job_id.clone(), "comparison-analysis", tx, move |ctx| {
+        comparison::run_comparison_analysis(&ws_job, &engine, &def_job, ctx)
+    });
+    state
+        .jobs
+        .lock()
+        .insert(job_id.clone(), handle.control.clone());
+
+    let watcher_app = app.clone();
+    let watch_job = job_id.clone();
+    let def_done = definition_id.clone();
+    std::thread::spawn(move || {
+        let result = handle.join();
+        let state = watcher_app.state::<AppState>();
+        state.jobs.lock().remove(&watch_job);
+        let payload = match result {
+            Ok(run) => AnalysisFinishedDto {
+                job_id: watch_job.clone(),
+                definition_id: def_done,
+                run: Some(run_dto(run)),
+                error: None,
+            },
+            Err(e) => AnalysisFinishedDto {
+                job_id: watch_job.clone(),
+                definition_id: def_done,
+                run: None,
+                error: Some(jerr(&e)),
+            },
+        };
+        let _ = watcher_app.emit("analysis-finished", &payload);
+    });
+
+    Ok(AnalysisStartedDto {
+        job_id,
+        definition_id,
+    })
+}
+
+/// One page of classified comparison rows from a completed run.
+#[tauri::command]
+pub fn list_comparison_results(
+    state: State<'_, AppState>,
+    run_id: String,
+    offset: u32,
+    limit: u32,
+) -> CmdResult<Vec<ComparisonResultDto>> {
+    let ws = ws_handle(&state)?;
+    with_engine(&state, None, |engine, _| {
+        comparison::list_comparison_results(&ws, engine, &run_id, offset as u64, limit as u64)
+            .map(|rows| rows.into_iter().map(result_dto).collect())
+            .map_err(|e| jerr(&e))
+    })
+}
+
+/// Drill-down to the records one key contributed on one side
+/// (`baseline` or `suspect`), re-derived from the frozen windows.
+/// Refused for stale runs — the answer would silently change.
+#[tauri::command]
+pub fn comparison_records(
+    state: State<'_, AppState>,
+    run_id: String,
+    key: String,
+    side: String,
+    limit: u32,
+) -> CmdResult<Vec<LogRowV2Dto>> {
+    let ws = ws_handle(&state)?;
+    with_engine(&state, None, |engine, _| {
+        comparison::comparison_records(&ws, engine, &run_id, &key, &side, limit as usize)
+            .map(|rows| rows.iter().map(crate::explorer_cmds::row_dto).collect())
+            .map_err(|e| jerr(&e))
     })
 }
 

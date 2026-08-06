@@ -1152,3 +1152,53 @@ pub struct AnalysisFinishedDto {
     pub run: Option<AnalysisRunDto>,
     pub error: Option<ErrorDto>,
 }
+
+/// Creation payload for a window comparison. Both windows are explicit
+/// concrete UTC nanos: a preset must resolve to visible bounds in the
+/// UI before it reaches this boundary, never after.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NewComparisonDefinitionDto {
+    pub name: String,
+    pub description: Option<String>,
+    pub dataset_ids: Vec<String>,
+    pub query_text: String,
+    /// `message_pattern | stack_fingerprint | severity | resource |
+    /// operation | outcome | event_name | attribute`.
+    pub dimension: String,
+    /// Required when `dimension` is `attribute`.
+    pub attribute: Option<String>,
+    /// Required when `dimension` is `stack_fingerprint`.
+    pub stack_field: Option<String>,
+    pub baseline_start: i64,
+    pub baseline_end: i64,
+    pub suspect_start: i64,
+    pub suspect_end: i64,
+    #[ts(type = "number | null")]
+    pub top_k: Option<i64>,
+    pub thresholds_json: String,
+    pub masking_profile_json: String,
+}
+
+/// One classified comparison row. `rate_change_bp` is basis points as a
+/// decimal string or `"undefined"` (zero baseline) — never a float and
+/// never an infinity, so the UI displays what was computed.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ComparisonResultDto {
+    pub result_id: String,
+    pub dimension: String,
+    pub key: String,
+    pub classification: String,
+    #[ts(type = "number")]
+    pub baseline_count: i64,
+    #[ts(type = "number")]
+    pub suspect_count: i64,
+    #[ts(type = "number")]
+    pub count_change: i64,
+    pub rate_change_bp: String,
+    pub rule_id: String,
+    #[ts(type = "number")]
+    pub rule_version: i64,
+    pub calculation_json: String,
+}

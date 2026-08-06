@@ -71,6 +71,9 @@ const DIMENSIONS: &[&str] = &[
     "stack_fingerprint",
     "severity",
     "resource",
+    "operation",
+    "outcome",
+    "event_name",
     "attribute",
 ];
 
@@ -181,7 +184,30 @@ enum KeySource {
     Stack(String),
     Severity,
     Resource,
+    /// Canonical generic field carried on the row itself. A record
+    /// whose source never mapped the field is excluded and counted,
+    /// never folded into a shared "(none)" bucket — otherwise a
+    /// dataset without the field would produce one enormous key that
+    /// reads like a real distribution.
+    Generic(GenericField),
     Attribute(String),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum GenericField {
+    Operation,
+    Outcome,
+    EventName,
+}
+
+impl GenericField {
+    fn of(self, row: &LogRow) -> Option<&String> {
+        match self {
+            GenericField::Operation => row.operation.as_ref(),
+            GenericField::Outcome => row.outcome.as_ref(),
+            GenericField::EventName => row.event_name.as_ref(),
+        }
+    }
 }
 
 fn key_source(
@@ -203,6 +229,9 @@ fn key_source(
         }
         "severity" => Ok(KeySource::Severity),
         "resource" => Ok(KeySource::Resource),
+        "operation" => Ok(KeySource::Generic(GenericField::Operation)),
+        "outcome" => Ok(KeySource::Generic(GenericField::Outcome)),
+        "event_name" => Ok(KeySource::Generic(GenericField::EventName)),
         _ => Ok(KeySource::Attribute(
             cfg.attribute.clone().unwrap_or_default(),
         )),
@@ -243,6 +272,13 @@ fn extract_key(row: &LogRow, source: &KeySource, side: &mut SideCounts) -> Optio
         },
         KeySource::Severity => Some(row.severity_text.clone().unwrap_or_else(|| "(none)".into())),
         KeySource::Resource => Some(row.resource_id.clone()),
+        KeySource::Generic(field) => match field.of(row) {
+            None => {
+                side.excluded_missing_field += 1;
+                None
+            }
+            Some(v) => Some(v.clone()),
+        },
         KeySource::Attribute(field) => match attr_str(row, field) {
             None => {
                 side.excluded_missing_field += 1;

@@ -428,7 +428,11 @@ fn main() {
             analysis_cmds::check_analysis_run,
             analysis_cmds::start_pattern_analysis,
             analysis_cmds::list_patterns,
-            analysis_cmds::pattern_records
+            analysis_cmds::pattern_records,
+            analysis_cmds::create_comparison_definition,
+            analysis_cmds::start_comparison_analysis,
+            analysis_cmds::list_comparison_results,
+            analysis_cmds::comparison_records
         ])
         .run(tauri::generate_context!())
         .expect("error while running LogScope");

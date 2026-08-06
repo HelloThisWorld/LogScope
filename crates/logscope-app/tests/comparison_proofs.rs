@@ -65,6 +65,60 @@ fn write_corpus(path: &Path) {
     }
 }
 
+/// `(operation, outcome)` when the source carries them at all.
+type GenericFields<'a> = Option<(&'a str, &'a str)>;
+
+/// Corpus for the canonical generic-field dimensions. Group C carries
+/// neither field, so the honest exclusion count is observable.
+fn write_generic_corpus(path: &Path) {
+    let mut f = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+    // (operation, outcome, baseline count, suspect count)
+    let groups: &[(GenericFields, usize, usize)] = &[
+        (Some(("checkout", "success")), 30, 12),
+        (Some(("refund", "failure")), 4, 20),
+        (None, 6, 6),
+    ];
+    let mut emit = |hour: u32, idx: usize, fields: Option<(&str, &str)>| {
+        let tail = match fields {
+            Some((op, outcome)) => {
+                format!(",\"operation\":\"{op}\",\"outcome\":\"{outcome}\"")
+            }
+            None => String::new(),
+        };
+        writeln!(
+            f,
+            "{{\"@timestamp\":\"2024-06-01T{hour:02}:{:02}:{:02}Z\",\"level\":\"INFO\",\
+             \"message\":\"request handled\"{tail}}}",
+            (idx / 60) % 60,
+            idx % 60,
+        )
+        .unwrap();
+    };
+    for (fields, base_n, susp_n) in groups {
+        for i in 0..*base_n {
+            emit(10, i, *fields);
+        }
+        for i in 0..*susp_n {
+            emit(11, i, *fields);
+        }
+    }
+}
+
+/// Maps the canonical generic fields so the operation/outcome
+/// dimensions have real values. `event_name` is deliberately left
+/// unmapped — JSONL sources never carry it, and the honest result is a
+/// counted exclusion rather than one giant "(none)" key.
+fn generic_profile() -> logscope_ingest::ImportProfile {
+    use logscope_ingest::FieldRef;
+    let mut p = builtin::jsonl_generic();
+    p.profile_id = "test.jsonl.generic-fields".into();
+    p.generic_fields = std::collections::BTreeMap::from([
+        ("operation".to_string(), vec![FieldRef::name("operation")]),
+        ("outcome".to_string(), vec![FieldRef::name("outcome")]),
+    ]);
+    p
+}
+
 struct Env {
     _dir: tempfile::TempDir,
     ws: Workspace,
@@ -73,16 +127,20 @@ struct Env {
 }
 
 fn env() -> Env {
+    env_with(write_corpus, builtin::jsonl_generic())
+}
+
+fn env_with(write: fn(&Path), profile: logscope_ingest::ImportProfile) -> Env {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("input.jsonl");
-    write_corpus(&input);
+    write(&input);
     let engine = EngineConnection::open_in_memory().unwrap();
     let mut ws = Workspace::create(&dir.path().join("ws"), "cmp", "0.4.0-test").unwrap();
     let (ctx, _c) = fg_ctx("job-import");
     let outcome = run_import(
         &mut ws,
         &engine,
-        &ImportRequest::new(vec![input], builtin::jsonl_generic(), "logs"),
+        &ImportRequest::new(vec![input], profile, "logs"),
         &ctx,
     )
     .unwrap();
@@ -357,6 +415,65 @@ fn drill_down_is_side_correct_and_refuses_stale_runs() {
     )
     .unwrap_err();
     assert_eq!(err.code, "analysis/stale-run");
+}
+
+#[test]
+fn canonical_generic_dimensions_compare_and_count_their_exclusions() {
+    let e = env_with(write_generic_corpus, generic_profile());
+
+    // operation: 30 → 12 over equal hours is −60 %; 4 → 20 is +400 %.
+    let def = cmp_def(&e, "operation", "", "{}");
+    let (ctx, _c) = fg_ctx("job-op");
+    let run = comparison::run_comparison_analysis(&e.ws, &e.engine, &def, &ctx).unwrap();
+    assert_eq!(run.state, "completed");
+    let counts: serde_json::Value = serde_json::from_str(&run.counts_json).unwrap();
+    assert_eq!(counts["baseline_accepted"], 34);
+    assert_eq!(counts["suspect_accepted"], 32);
+    assert_eq!(
+        counts["excluded_missing_field"], 12,
+        "records without the field are counted, never bucketed as (none)"
+    );
+    let rows = comparison::list_comparison_results(&e.ws, &e.engine, &run.run_id, 0, 100).unwrap();
+    let checkout = by_key(&rows, "checkout");
+    assert_eq!((checkout.baseline_count, checkout.suspect_count), (30, 12));
+    assert_eq!(checkout.classification, "decreased");
+    assert_eq!(checkout.rate_change_bp, "-6000");
+    let refund = by_key(&rows, "refund");
+    assert_eq!(refund.classification, "increased");
+    assert_eq!(refund.rate_change_bp, "40000");
+
+    // outcome: the same records keyed by the other canonical field.
+    let def = cmp_def(&e, "outcome", "", "{}");
+    let (ctx, _c) = fg_ctx("job-outcome");
+    let run = comparison::run_comparison_analysis(&e.ws, &e.engine, &def, &ctx).unwrap();
+    let rows = comparison::list_comparison_results(&e.ws, &e.engine, &run.run_id, 0, 100).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(by_key(&rows, "success").classification, "decreased");
+    assert_eq!(by_key(&rows, "failure").classification, "increased");
+    // Drill-down proves the key really selected those records.
+    let recs =
+        comparison::comparison_records(&e.ws, &e.engine, &run.run_id, "failure", "suspect", 1000)
+            .unwrap();
+    assert_eq!(recs.len(), 20);
+
+    // event_name is unmapped for JSONL: an empty result with every
+    // record counted as excluded, not an invented distribution.
+    let def = cmp_def(&e, "event_name", "", "{}");
+    let (ctx, _c) = fg_ctx("job-evname");
+    let run = comparison::run_comparison_analysis(&e.ws, &e.engine, &def, &ctx).unwrap();
+    assert_eq!(run.state, "completed");
+    let counts: serde_json::Value = serde_json::from_str(&run.counts_json).unwrap();
+    assert_eq!(counts["baseline_accepted"], 0);
+    assert_eq!(counts["suspect_accepted"], 0);
+    assert_eq!(counts["excluded_missing_field"], 78, "40 + 38 records");
+    let manifest: serde_json::Value =
+        serde_json::from_str(run.manifest_json.as_deref().unwrap()).unwrap();
+    assert_eq!(manifest["distinct_keys"], 0);
+    assert!(
+        comparison::list_comparison_results(&e.ws, &e.engine, &run.run_id, 0, 100)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
