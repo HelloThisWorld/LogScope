@@ -68,6 +68,13 @@ pub struct LogRow {
     pub operation: Option<String>,
     pub outcome: Option<String>,
     pub event_name: Option<String>,
+    pub event_type: Option<String>,
+    /// Stable application/transport identifiers — correlation keys.
+    /// They carry no ordering or causation meaning by themselves.
+    pub request_id: Option<String>,
+    pub transaction_id: Option<String>,
+    pub message_id: Option<String>,
+    pub entity_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,7 +211,8 @@ pub fn query_log_page(
         "SELECT record_id, event_time, severity_text, severity_number, display_message,
                 resource_id, trace_id, span_id, dataset_id, source_id,
                 record_number, line_start, attributes_json, provenance_json,
-                operation, outcome, event_name
+                operation, outcome, event_name, event_type, request_id,
+                transaction_id, message_id, entity_id
          FROM {files}
          {where_sql}
          ORDER BY event_time NULLS LAST, record_id
@@ -238,6 +246,11 @@ pub fn query_log_page(
                 operation: r.get(14)?,
                 outcome: r.get(15)?,
                 event_name: r.get(16)?,
+                event_type: r.get(17)?,
+                request_id: r.get(18)?,
+                transaction_id: r.get(19)?,
+                message_id: r.get(20)?,
+                entity_id: r.get(21)?,
             })
         })?;
         for row in mapped {
