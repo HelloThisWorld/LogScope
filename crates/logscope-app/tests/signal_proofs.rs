@@ -342,6 +342,71 @@ fn skew_and_gap_report_originals_deltas_and_tolerances_without_rewriting_time() 
         .any(|s| s.kind == "clock_skew"));
 }
 
+/// The Correlate form composes `config_json` field by field in
+/// `analysis_cmds::create_correlation_definition`, which lives in the
+/// desktop crate and is therefore outside the workspace test run. A
+/// renamed field there would break the UI at runtime with nothing to
+/// catch it, so the exact shapes that command emits are pinned here.
+#[test]
+fn the_shapes_the_correlate_form_composes_are_accepted_or_refused_as_it_expects() {
+    // Everything the form can turn on at once, on a correlated key.
+    let full = r#"{
+        "key":"request_id",
+        "normalization":{"trim":true,"case_fold":true,"strip_prefix":"req-"},
+        "signals":["retry","operational_duplicate","clock_skew","gap"],
+        "thresholds":{"clock_skew_tolerance_nanos":1000000,"gap_threshold_nanos":300000000000},
+        "attempt_attribute":"attempt"
+    }"#;
+    let cfg = correlation::CorrelationConfig::parse(full, "{}").unwrap();
+    assert_eq!(cfg.signals.len(), 4);
+    assert_eq!(cfg.attempt_attribute.as_deref(), Some("attempt"));
+    assert_eq!(cfg.thresholds.gap_threshold_nanos, 300_000_000_000);
+
+    // The attribute key carries its field the way the form sends it.
+    let attribute = r#"{"key":"attribute","attribute":"session.id",
+        "normalization":{"trim":false,"case_fold":false},"signals":[],
+        "thresholds":{"clock_skew_tolerance_nanos":0,"gap_threshold_nanos":1}}"#;
+    correlation::CorrelationConfig::parse(attribute, "{}").unwrap();
+
+    // The form disables the normalization controls for canonical
+    // identifiers; the engine refuses them regardless, which is what
+    // makes the disabled control a display of the rule rather than the
+    // rule itself.
+    let exact_with_normalization = r#"{"key":"trace_id",
+        "normalization":{"trim":true,"case_fold":false},"signals":[],
+        "thresholds":{"clock_skew_tolerance_nanos":0,"gap_threshold_nanos":1}}"#;
+    let err = correlation::CorrelationConfig::parse(exact_with_normalization, "{}")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("validated and normalized at ingest"), "{err}");
+
+    // Shapes the form cannot produce, refused anyway.
+    for (bad, expect) in [
+        (
+            r#"{"key":"span_id","normalization":{},"signals":[],"thresholds":{}}"#,
+            "unique only",
+        ),
+        (
+            r#"{"key":"attribute","normalization":{},"signals":[],"thresholds":{}}"#,
+            "config.attribute",
+        ),
+        (
+            r#"{"key":"request_id","normalization":{},"signals":[],
+               "thresholds":{"gap_threshold_nanos":0}}"#,
+            "reports every pair",
+        ),
+        (
+            r#"{"key":"request_id","normalization":{},"signals":["hunch"],"thresholds":{}}"#,
+            "unknown signal",
+        ),
+    ] {
+        let err = correlation::CorrelationConfig::parse(bad, "{}")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(expect), "expected {expect:?} in {err}");
+    }
+}
+
 #[test]
 fn signals_can_be_selected_and_an_empty_selection_is_honoured_as_written() {
     let e = env();

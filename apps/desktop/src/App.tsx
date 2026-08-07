@@ -9,6 +9,7 @@ import type { OverviewDto, RestoreContextDto, WorkspaceInfoDto } from "./api";
 import Explorer from "./Explorer";
 import Patterns from "./Patterns";
 import Compare from "./Compare";
+import Correlate from "./Correlate";
 import CaseView from "./Case";
 
 type JobEventPayload = {
@@ -45,7 +46,7 @@ export default function App() {
   const [activeJob, setActiveJob] = useState<string | null>(null);
   const [jobLine, setJobLine] = useState<string>("");
   const [view, setView] = useState<
-    "home" | "explorer" | "case" | "patterns" | "compare"
+    "home" | "explorer" | "case" | "patterns" | "compare" | "correlate"
   >("home");
   const [pendingRestore, setPendingRestore] =
     useState<RestoreContextDto | null>(null);
@@ -222,6 +223,20 @@ export default function App() {
     );
   }
 
+  if (view === "correlate" && workspace) {
+    return (
+      <main className="main-wide">
+        {error && <div className="error">{error}</div>}
+        <Correlate
+          onBack={() => {
+            setView("home");
+            void refreshOverview();
+          }}
+        />
+      </main>
+    );
+  }
+
   if (view === "case" && workspace) {
     return (
       <main className="main-wide">
@@ -364,6 +379,16 @@ export default function App() {
                 }
               >
                 Compare
+              </button>
+              <button
+                onClick={() => setView("correlate")}
+                disabled={
+                  !overview?.datasets.some(
+                    (d) => d.signal === "logs" && d.status === "published",
+                  ) || !!activeJob
+                }
+              >
+                Correlate
               </button>
               <button onClick={doClose}>Close workspace</button>
               <button onClick={refreshOverview}>Refresh</button>

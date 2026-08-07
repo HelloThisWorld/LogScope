@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use logscope_app::dto::*;
-use logscope_app::{analysis, comparison, patterns};
+use logscope_app::{analysis, comparison, correlation, patterns};
 use logscope_jobs::JobEvent;
 use logscope_query::TimeStrategy;
 use logscope_workspace::{AnalysisDefinitionRow, AnalysisRunRow, Workspace};
@@ -479,5 +479,307 @@ pub fn pattern_records(
         patterns::pattern_records(&ws, engine, &run_id, &pattern_id, limit as usize)
             .map(|rows| rows.iter().map(crate::explorer_cmds::row_dto).collect())
             .map_err(|e| jerr(&e))
+    })
+}
+
+fn group_dto(row: correlation::CorrelationGroup) -> CorrelationGroupDto {
+    CorrelationGroupDto {
+        group_id: row.group_id,
+        key_selector: row.key_selector,
+        key_value: row.key_value,
+        confidence: row.confidence,
+        event_count: row.event_count as i64,
+        undated_count: row.undated_count as i64,
+        truncated_count: row.truncated_count as i64,
+        first_event_time: row.first_event_time,
+        last_event_time: row.last_event_time,
+        resources_json: row.resources_json,
+        edge_count: row.edge_count as i64,
+        rule_id: row.rule_id,
+        rule_version: row.rule_version,
+        reason: row.reason,
+    }
+}
+
+fn edge_dto(row: correlation::CorrelationEdge) -> CorrelationEdgeDto {
+    CorrelationEdgeDto {
+        edge_id: row.edge_id,
+        group_id: row.group_id,
+        from_record_id: row.from_record_id,
+        to_record_id: row.to_record_id,
+        from_event_time: row.from_event_time,
+        to_event_time: row.to_event_time,
+        delta_nanos: row.delta_nanos,
+        confidence: row.confidence,
+        reason: row.reason,
+    }
+}
+
+fn signal_dto(row: correlation::CorrelationSignal) -> CorrelationSignalDto {
+    CorrelationSignalDto {
+        signal_id: row.signal_id,
+        group_id: row.group_id,
+        kind: row.kind,
+        rule_id: row.rule_id,
+        rule_version: row.rule_version,
+        strength: row.strength,
+        investigative_lead: row.investigative_lead,
+        from_record_id: row.from_record_id,
+        to_record_id: row.to_record_id,
+        from_event_time: row.from_event_time,
+        to_event_time: row.to_event_time,
+        delta_nanos: row.delta_nanos,
+        tolerance_nanos: row.tolerance_nanos,
+        matched_json: row.matched_json,
+        missing_json: row.missing_json,
+        reason: row.reason,
+    }
+}
+
+/// Composes `config_json` from typed fields and parses it immediately,
+/// so an impossible combination (normalization on a canonical
+/// identifier, `span_id` as a key, a zero gap threshold) is refused
+/// before a definition row exists.
+#[tauri::command]
+pub fn create_correlation_definition(
+    state: State<'_, AppState>,
+    new: NewCorrelationDefinitionDto,
+) -> CmdResult<AnalysisDefinitionDto> {
+    let ws = ws_handle(&state)?;
+    let mut normalization = serde_json::json!({
+        "trim": new.trim,
+        "case_fold": new.case_fold,
+    });
+    if let Some(prefix) = new.strip_prefix.as_deref().filter(|s| !s.is_empty()) {
+        normalization["strip_prefix"] = prefix.into();
+    }
+    let mut config = serde_json::json!({
+        "key": new.key,
+        "normalization": normalization,
+        "signals": new.signals,
+        "thresholds": {
+            "clock_skew_tolerance_nanos": new.clock_skew_tolerance_nanos,
+            "gap_threshold_nanos": new.gap_threshold_nanos,
+        },
+    });
+    if let Some(attribute) = new
+        .attribute
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        config["attribute"] = attribute.into();
+    }
+    if let Some(field) = new
+        .attempt_attribute
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        config["attempt_attribute"] = field.into();
+    }
+    let config_json = config.to_string();
+    // Structured refusal now, not after a run row exists.
+    correlation::CorrelationConfig::parse(&config_json, "{}").map_err(|e| jerr(&e))?;
+
+    analysis::create_definition(
+        &ws,
+        &analysis::NewDefinitionRequest {
+            kind: "correlation".into(),
+            name: new.name,
+            description: new.description,
+            dataset_ids: new.dataset_ids,
+            query_text: new.query_text,
+            time_strategy: TimeStrategy::All,
+            field_selection_json: "{}".into(),
+            algorithm_id: logscope_case::correlation::CORRELATION_RULE_ID.into(),
+            algorithm_version: logscope_case::correlation::CORRELATION_RULE_VERSION,
+            config_json,
+            masking_profile_json: "{}".into(),
+            thresholds_json: "{}".into(),
+            limits_json: "{}".into(),
+        },
+    )
+    .map(def_dto)
+    .map_err(|e| jerr(&e))
+}
+
+/// Starts a correlation job on the same job/cancel/terminal-event
+/// machinery as the other analyses.
+#[tauri::command]
+pub fn start_correlation_analysis(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    definition_id: String,
+) -> CmdResult<AnalysisStartedDto> {
+    let ws = ws_handle(&state)?;
+    let job_id = format!("job-{}", uuid::Uuid::new_v4());
+    let (tx, rx) = crossbeam_channel::unbounded::<JobEvent>();
+    let event_app = app.clone();
+    std::thread::spawn(move || {
+        for event in rx.iter() {
+            let _ = event_app.emit("job-event", &event);
+        }
+    });
+
+    let engine =
+        logscope_query::EngineConnection::open_in_memory().map_err(|e| err(e.code(), e))?;
+    let ws_job: Arc<Workspace> = ws.clone();
+    let def_job = definition_id.clone();
+    let handle = logscope_jobs::spawn_job(job_id.clone(), "correlation-analysis", tx, move |ctx| {
+        correlation::run_correlation_analysis(&ws_job, &engine, &def_job, ctx)
+    });
+    state
+        .jobs
+        .lock()
+        .insert(job_id.clone(), handle.control.clone());
+
+    let watcher_app = app.clone();
+    let watch_job = job_id.clone();
+    let def_done = definition_id.clone();
+    std::thread::spawn(move || {
+        let result = handle.join();
+        let state = watcher_app.state::<AppState>();
+        state.jobs.lock().remove(&watch_job);
+        let payload = match result {
+            Ok(run) => AnalysisFinishedDto {
+                job_id: watch_job.clone(),
+                definition_id: def_done,
+                run: Some(run_dto(run)),
+                error: None,
+            },
+            Err(e) => AnalysisFinishedDto {
+                job_id: watch_job.clone(),
+                definition_id: def_done,
+                run: None,
+                error: Some(jerr(&e)),
+            },
+        };
+        let _ = watcher_app.emit("analysis-finished", &payload);
+    });
+
+    Ok(AnalysisStartedDto {
+        job_id,
+        definition_id,
+    })
+}
+
+/// One page of correlation groups in the stored deterministic order.
+#[tauri::command]
+pub fn list_correlation_groups(
+    state: State<'_, AppState>,
+    run_id: String,
+    offset: u32,
+    limit: u32,
+) -> CmdResult<Vec<CorrelationGroupDto>> {
+    let ws = ws_handle(&state)?;
+    with_engine(&state, None, |engine, _| {
+        correlation::list_correlation_groups(&ws, engine, &run_id, offset as u64, limit as u64)
+            .map(|rows| rows.into_iter().map(group_dto).collect())
+            .map_err(|e| jerr(&e))
+    })
+}
+
+/// The bounded ordered edges of one group (previous/next only).
+#[tauri::command]
+pub fn list_correlation_edges(
+    state: State<'_, AppState>,
+    run_id: String,
+    group_id: String,
+    limit: u32,
+) -> CmdResult<Vec<CorrelationEdgeDto>> {
+    let ws = ws_handle(&state)?;
+    with_engine(&state, None, |engine, _| {
+        correlation::list_correlation_edges(&ws, engine, &run_id, &group_id, limit as u64)
+            .map(|rows| rows.into_iter().map(edge_dto).collect())
+            .map_err(|e| jerr(&e))
+    })
+}
+
+/// The behavioural signals observed inside one group. A run produced
+/// before signals existed is refused with the re-run instruction rather
+/// than returning an empty page.
+#[tauri::command]
+pub fn list_correlation_signals(
+    state: State<'_, AppState>,
+    run_id: String,
+    group_id: String,
+    limit: u32,
+) -> CmdResult<Vec<CorrelationSignalDto>> {
+    let ws = ws_handle(&state)?;
+    with_engine(&state, None, |engine, _| {
+        correlation::list_correlation_signals(&ws, engine, &run_id, &group_id, limit as u64)
+            .map(|rows| rows.into_iter().map(signal_dto).collect())
+            .map_err(|e| jerr(&e))
+    })
+}
+
+/// Deterministic drill-down to a group's member records. Refused for
+/// stale runs: the answer would silently change.
+#[tauri::command]
+pub fn correlation_records(
+    state: State<'_, AppState>,
+    run_id: String,
+    group_id: String,
+    limit: u32,
+) -> CmdResult<Vec<LogRowV2Dto>> {
+    let ws = ws_handle(&state)?;
+    with_engine(&state, None, |engine, _| {
+        correlation::correlation_records(&ws, engine, &run_id, &group_id, limit as usize)
+            .map(|rows| rows.iter().map(crate::explorer_cmds::row_dto).collect())
+            .map_err(|e| jerr(&e))
+    })
+}
+
+/// A probable neighborhood around one selected record, inside the run's
+/// frozen scope. Always `probable`: proximity is evidence that two
+/// things were near each other, and nothing more.
+#[tauri::command]
+pub fn probable_neighborhood(
+    state: State<'_, AppState>,
+    run_id: String,
+    anchor_record_id: String,
+    compatible_fields: Vec<String>,
+    tolerance_nanos: i64,
+    max_neighbors: u32,
+) -> CmdResult<ProbableNeighborhoodDto> {
+    let ws = ws_handle(&state)?;
+    with_engine(&state, None, |engine, _| {
+        correlation::probable_neighborhood(
+            &ws,
+            engine,
+            &run_id,
+            &anchor_record_id,
+            &compatible_fields,
+            tolerance_nanos,
+            max_neighbors as u64,
+        )
+        .map(|h| ProbableNeighborhoodDto {
+            anchor_record_id: h.anchor_record_id,
+            anchor_event_time: h.anchor_event_time,
+            anchor_time_quality: h.anchor_time_quality,
+            rule_id: h.rule_id,
+            rule_version: h.rule_version,
+            confidence: h.confidence,
+            compatible_fields: h.compatible_fields,
+            constraints: h.constraints,
+            tolerance_nanos: h.tolerance_nanos,
+            neighbors: h
+                .neighbors
+                .into_iter()
+                .map(|n| ProbableNeighborDto {
+                    record_id: n.record_id,
+                    event_time: n.event_time,
+                    delta_nanos: n.delta_nanos,
+                    matched_fields: n.matched_fields,
+                    time_quality: n.time_quality,
+                })
+                .collect(),
+            admitted: h.admitted as i64,
+            truncated: h.truncated as i64,
+            scanned: h.scanned as i64,
+            reason: h.reason,
+        })
+        .map_err(|e| jerr(&e))
     })
 }

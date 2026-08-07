@@ -1202,3 +1202,148 @@ pub struct ComparisonResultDto {
     pub rule_version: i64,
     pub calculation_json: String,
 }
+
+/// Typed correlation definition. The key selector and its normalization
+/// are one decision, so they cross the boundary together and are parsed
+/// immediately — a refusal must happen before a definition exists.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NewCorrelationDefinitionDto {
+    pub name: String,
+    pub description: Option<String>,
+    pub dataset_ids: Vec<String>,
+    pub query_text: String,
+    /// `trace_id | trace_span | request_id | transaction_id |
+    /// message_id | entity_id | attribute`. There is deliberately no
+    /// `span_id`: a span ID is unique only within its trace.
+    pub key: String,
+    /// Required when `key` is `attribute`.
+    pub attribute: Option<String>,
+    pub trim: bool,
+    pub case_fold: bool,
+    pub strip_prefix: Option<String>,
+    /// Signals to evaluate. An empty list means none, which is a
+    /// different request from omitting the field and is honoured as
+    /// written.
+    pub signals: Vec<String>,
+    /// Attribute holding an explicit attempt counter. Without it a
+    /// retry can never be reported as documented.
+    pub attempt_attribute: Option<String>,
+    #[ts(type = "number")]
+    pub clock_skew_tolerance_nanos: i64,
+    #[ts(type = "number")]
+    pub gap_threshold_nanos: i64,
+}
+
+/// One correlation group.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CorrelationGroupDto {
+    pub group_id: String,
+    pub key_selector: String,
+    pub key_value: String,
+    /// `exact | correlated | probable`.
+    pub confidence: String,
+    #[ts(type = "number")]
+    pub event_count: i64,
+    /// Members carrying the key but with no event time: counted, never
+    /// ordered.
+    #[ts(type = "number")]
+    pub undated_count: i64,
+    #[ts(type = "number")]
+    pub truncated_count: i64,
+    /// Nanosecond timestamps exceed JS exact-integer range, so these
+    /// stay bigint and the UI converts through BigInt.
+    pub first_event_time: Option<i64>,
+    pub last_event_time: Option<i64>,
+    pub resources_json: String,
+    #[ts(type = "number")]
+    pub edge_count: i64,
+    pub rule_id: String,
+    #[ts(type = "number")]
+    pub rule_version: i64,
+    pub reason: String,
+}
+
+/// One edge between consecutive records of a group.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CorrelationEdgeDto {
+    pub edge_id: String,
+    pub group_id: String,
+    pub from_record_id: String,
+    pub to_record_id: String,
+    pub from_event_time: i64,
+    pub to_event_time: i64,
+    /// Reported as measured. A negative value is a real observation
+    /// about the data, not an error to correct.
+    pub delta_nanos: i64,
+    pub confidence: String,
+    pub reason: String,
+}
+
+/// One behavioural signal (`sig-rules` v1).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CorrelationSignalDto {
+    pub signal_id: String,
+    pub group_id: String,
+    /// `retry | operational_duplicate | clock_skew | gap`.
+    pub kind: String,
+    pub rule_id: String,
+    #[ts(type = "number")]
+    pub rule_version: i64,
+    /// `documented | corroborated | indicative`.
+    pub strength: String,
+    /// True for everything the source did not state itself. A column so
+    /// the UI can label leads without parsing prose.
+    pub investigative_lead: bool,
+    pub from_record_id: String,
+    pub to_record_id: String,
+    pub from_event_time: i64,
+    pub to_event_time: i64,
+    pub delta_nanos: i64,
+    pub tolerance_nanos: Option<i64>,
+    /// JSON arrays of typed field names.
+    pub matched_json: String,
+    pub missing_json: String,
+    pub reason: String,
+}
+
+/// One record admitted to a probable neighborhood.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProbableNeighborDto {
+    pub record_id: String,
+    pub event_time: i64,
+    pub delta_nanos: i64,
+    pub matched_fields: Vec<String>,
+    /// `observed | inferred | missing`.
+    pub time_quality: String,
+}
+
+/// A neighborhood anchored to one selected record. Every term gate 21
+/// requires is a field here rather than something the UI assembles.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProbableNeighborhoodDto {
+    pub anchor_record_id: String,
+    pub anchor_event_time: i64,
+    pub anchor_time_quality: String,
+    pub rule_id: String,
+    #[ts(type = "number")]
+    pub rule_version: i64,
+    /// Always `probable`.
+    pub confidence: String,
+    pub compatible_fields: Vec<String>,
+    pub constraints: String,
+    pub tolerance_nanos: i64,
+    pub neighbors: Vec<ProbableNeighborDto>,
+    #[ts(type = "number")]
+    pub admitted: i64,
+    #[ts(type = "number")]
+    pub truncated: i64,
+    #[ts(type = "number")]
+    pub scanned: i64,
+    pub reason: String,
+}
