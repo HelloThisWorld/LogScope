@@ -202,7 +202,12 @@ pub struct QueryPage {
 const LOG_COLUMNS: &str = "record_id, event_time, severity_text, severity_number, \
      display_message, resource_id, trace_id, span_id, dataset_id, source_id, \
      record_number, line_start, attributes_json, provenance_json, \
-     operation, outcome, event_name";
+     operation, outcome, event_name, event_type, request_id, \
+     transaction_id, message_id, entity_id";
+
+/// Number of columns `LOG_COLUMNS` selects. Queries that append their
+/// own columns index from here; keep it in step with the list above.
+const LOG_COLUMN_COUNT: usize = 22;
 
 fn map_log_row(r: &duckdb::Row<'_>) -> Result<LogRow, duckdb::Error> {
     Ok(LogRow {
@@ -223,6 +228,11 @@ fn map_log_row(r: &duckdb::Row<'_>) -> Result<LogRow, duckdb::Error> {
         operation: r.get(14)?,
         outcome: r.get(15)?,
         event_name: r.get(16)?,
+        event_type: r.get(17)?,
+        request_id: r.get(18)?,
+        transaction_id: r.get(19)?,
+        message_id: r.get(20)?,
+        entity_id: r.get(21)?,
     })
 }
 
@@ -967,11 +977,11 @@ pub fn fetch_record_detail(
                 Ok(RecordDetail {
                     event_name: row.event_name.clone(),
                     row,
-                    scope_id: r.get(17)?,
-                    body_json: r.get(18)?,
-                    original_timestamp_text: r.get(19)?,
-                    timezone_assumption_json: r.get(20)?,
-                    observed_time: r.get(21)?,
+                    scope_id: r.get(LOG_COLUMN_COUNT)?,
+                    body_json: r.get(LOG_COLUMN_COUNT + 1)?,
+                    original_timestamp_text: r.get(LOG_COLUMN_COUNT + 2)?,
+                    timezone_assumption_json: r.get(LOG_COLUMN_COUNT + 3)?,
+                    observed_time: r.get(LOG_COLUMN_COUNT + 4)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

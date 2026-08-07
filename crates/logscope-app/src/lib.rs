@@ -8,6 +8,7 @@ pub mod analysis;
 pub mod bundle;
 pub mod case;
 pub mod comparison;
+pub mod correlation;
 pub mod dto;
 pub mod explorer;
 pub mod export;

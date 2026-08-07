@@ -9,6 +9,7 @@
 
 pub mod analysis;
 pub mod comparison;
+pub mod correlation;
 pub mod envelope;
 pub mod ids;
 pub mod stack;
