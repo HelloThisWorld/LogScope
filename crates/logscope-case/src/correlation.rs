@@ -26,6 +26,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::signals::{TimeQuality, INVESTIGATIVE_LEAD};
 use crate::CaseError;
 
 /// Rule identity for the correlation rule set.
@@ -356,6 +357,10 @@ pub struct CorrelationLimits {
     pub max_groups: usize,
     pub max_edges_per_event: usize,
     pub max_total_edges: usize,
+    /// Signals are bounded separately from edges: they answer a
+    /// different question, and sharing one budget would let a noisy
+    /// group's signals silently consume the sequence's edges.
+    pub max_total_signals: usize,
 }
 
 impl Default for CorrelationLimits {
@@ -366,6 +371,7 @@ impl Default for CorrelationLimits {
             max_groups: 10_000,
             max_edges_per_event: 32,
             max_total_edges: 250_000,
+            max_total_signals: 250_000,
         }
     }
 }
@@ -464,6 +470,262 @@ pub fn explain_edge(selector: &KeySelector, key: &str, delta_nanos: i64) -> Stri
          measured — no timestamp was adjusted.",
         selector.describe()
     )
+}
+
+/* ------------------------------------------ probable neighborhoods */
+
+/// A field that two records must agree on for a probable neighborhood.
+/// Every variant is a typed canonical column — there is no free-text or
+/// similarity option, because "looks alike" is not a rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompatibleField {
+    Resource,
+    Dataset,
+    Source,
+    Operation,
+    Outcome,
+    EventName,
+    EventType,
+    Severity,
+}
+
+pub const COMPATIBLE_FIELDS: &[&str] = &[
+    "resource",
+    "dataset",
+    "source",
+    "operation",
+    "outcome",
+    "event_name",
+    "event_type",
+    "severity",
+];
+
+impl CompatibleField {
+    pub fn parse(name: &str) -> Result<CompatibleField, CaseError> {
+        match name {
+            "resource" => Ok(CompatibleField::Resource),
+            "dataset" => Ok(CompatibleField::Dataset),
+            "source" => Ok(CompatibleField::Source),
+            "operation" => Ok(CompatibleField::Operation),
+            "outcome" => Ok(CompatibleField::Outcome),
+            "event_name" => Ok(CompatibleField::EventName),
+            "event_type" => Ok(CompatibleField::EventType),
+            "severity" => Ok(CompatibleField::Severity),
+            other => Err(CaseError::Invalid(format!(
+                "unknown compatible field {other:?} (expected one of {})",
+                COMPATIBLE_FIELDS.join("|")
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CompatibleField::Resource => "resource",
+            CompatibleField::Dataset => "dataset",
+            CompatibleField::Source => "source",
+            CompatibleField::Operation => "operation",
+            CompatibleField::Outcome => "outcome",
+            CompatibleField::EventName => "event_name",
+            CompatibleField::EventType => "event_type",
+            CompatibleField::Severity => "severity",
+        }
+    }
+
+    fn of<'a>(self, facts: &NeighborFacts<'a>) -> Option<&'a str> {
+        match self {
+            CompatibleField::Resource => facts.resource_id,
+            CompatibleField::Dataset => Some(facts.dataset_id),
+            CompatibleField::Source => Some(facts.source_id),
+            CompatibleField::Operation => facts.operation,
+            CompatibleField::Outcome => facts.outcome,
+            CompatibleField::EventName => facts.event_name,
+            CompatibleField::EventType => facts.event_type,
+            CompatibleField::Severity => facts.severity,
+        }
+    }
+}
+
+/// The canonical columns a neighborhood rule may compare.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NeighborFacts<'a> {
+    pub record_id: &'a str,
+    pub event_time: Option<i64>,
+    pub time_quality: TimeQuality,
+    pub dataset_id: &'a str,
+    pub source_id: &'a str,
+    pub resource_id: Option<&'a str>,
+    pub operation: Option<&'a str>,
+    pub outcome: Option<&'a str>,
+    pub event_name: Option<&'a str>,
+    pub event_type: Option<&'a str>,
+    pub severity: Option<&'a str>,
+}
+
+/// A bounded, documented proximity rule anchored to one record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbableRule {
+    /// Fields the anchor and neighbour must agree on. May be empty,
+    /// which is proximity alone and is reported as such.
+    pub compatible_fields: Vec<CompatibleField>,
+    /// Half-width of the window around the anchor's event time.
+    pub tolerance_nanos: i64,
+}
+
+impl ProbableRule {
+    pub fn validate(&self) -> Result<(), CaseError> {
+        if self.tolerance_nanos <= 0 {
+            return Err(CaseError::Invalid(
+                "tolerance_nanos must be positive: a neighborhood with no width selects \
+                 only records sharing an exact instant"
+                    .into(),
+            ));
+        }
+        let mut seen = Vec::new();
+        for field in &self.compatible_fields {
+            if seen.contains(&field.as_str()) {
+                return Err(CaseError::Invalid(format!(
+                    "compatible field {} is listed twice",
+                    field.as_str()
+                )));
+            }
+            seen.push(field.as_str());
+        }
+        Ok(())
+    }
+
+    /// The constraints this rule imposes, rendered for display. Gate 21
+    /// requires a neighborhood to state its own constraints, not just
+    /// its results.
+    pub fn describe_constraints(&self) -> String {
+        let fields = if self.compatible_fields.is_empty() {
+            "no field equality required (time proximity alone)".to_string()
+        } else {
+            format!(
+                "equal {}",
+                self.compatible_fields
+                    .iter()
+                    .map(|f| f.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            )
+        };
+        format!(
+            "within {} ns of the anchor's event time, {fields}",
+            self.tolerance_nanos
+        )
+    }
+}
+
+/// One record admitted to a neighborhood.
+///
+/// The confidence is not a field, and there is no constructor that sets
+/// one: a neighborhood is [`Confidence::Probable`] and cannot be
+/// anything else. Gate 22 is therefore a property of the type rather
+/// than a check that could be forgotten.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbableNeighbor {
+    pub record_id: String,
+    /// Neighbour time minus anchor time, exactly as recorded.
+    pub delta_nanos: i64,
+    pub anchor_event_time: i64,
+    pub neighbor_event_time: i64,
+    pub matched_fields: Vec<&'static str>,
+    pub time_quality: TimeQuality,
+}
+
+impl ProbableNeighbor {
+    /// Always `Probable`. Time proximity is evidence that two things
+    /// were near each other, and nothing more.
+    pub fn confidence(&self) -> Confidence {
+        Confidence::Probable
+    }
+}
+
+/// The limitation every neighborhood carries.
+pub const PROXIMITY_LIMITATION: &str =
+    "Records near each other in time are not thereby related: any busy system produces \
+     unrelated records in the same interval. This neighborhood is a starting point for \
+     investigation, not a relationship.";
+
+/// Evaluates one candidate against the anchor.
+///
+/// Returns `None` when either record is undated (a neighborhood is
+/// defined by time, and an undated record has no distance), when the
+/// candidate is the anchor itself, when it falls outside the tolerance,
+/// or when a required field is absent or unequal. A required field that
+/// the candidate does not carry is a rejection, never a wildcard.
+pub fn evaluate_probable(
+    anchor: &NeighborFacts<'_>,
+    candidate: &NeighborFacts<'_>,
+    rule: &ProbableRule,
+) -> Option<ProbableNeighbor> {
+    if candidate.record_id == anchor.record_id {
+        return None;
+    }
+    let (anchor_time, candidate_time) = (anchor.event_time?, candidate.event_time?);
+    let delta = candidate_time.checked_sub(anchor_time)?;
+    if delta.saturating_abs() > rule.tolerance_nanos {
+        return None;
+    }
+
+    let mut matched = Vec::new();
+    for field in &rule.compatible_fields {
+        match (field.of(anchor), field.of(candidate)) {
+            (Some(a), Some(b)) if a == b => matched.push(field.as_str()),
+            _ => return None,
+        }
+    }
+
+    Some(ProbableNeighbor {
+        record_id: candidate.record_id.to_string(),
+        delta_nanos: delta,
+        anchor_event_time: anchor_time,
+        neighbor_event_time: candidate_time,
+        matched_fields: matched,
+        time_quality: candidate.time_quality,
+    })
+}
+
+/// Canonical neighborhood ordering: absolute distance from the anchor,
+/// then event time, then record ID. Distance first is what makes a
+/// truncated neighborhood useful — the records dropped by a limit are
+/// the least relevant ones, not an arbitrary tail.
+pub fn neighbor_order(n: &ProbableNeighbor) -> (i64, i64, &str) {
+    (
+        n.delta_nanos.saturating_abs(),
+        n.neighbor_event_time,
+        n.record_id.as_str(),
+    )
+}
+
+/// Builds the explanation for a neighborhood. Gate 21 wants all six of
+/// rule, fields, constraints, tolerance, quality, and limitation, so
+/// each one is named here rather than left for a caller to remember.
+pub fn explain_neighborhood(
+    rule: &ProbableRule,
+    anchor_record_id: &str,
+    anchor_quality: TimeQuality,
+    admitted: usize,
+    truncated: usize,
+) -> String {
+    let mut text = format!(
+        "Probable ({CORRELATION_RULE_ID} v{CORRELATION_RULE_VERSION}, neighborhood): \
+         {admitted} record(s) anchored to {anchor_record_id} under the constraint {}. \
+         Anchor timestamp quality: {}.",
+        rule.describe_constraints(),
+        anchor_quality.as_str(),
+    );
+    if truncated > 0 {
+        text.push_str(&format!(
+            " {truncated} further record(s) met the rule but were dropped by the \
+             neighborhood limit, nearest first."
+        ));
+    }
+    text.push(' ');
+    text.push_str(INVESTIGATIVE_LEAD);
+    text.push(' ');
+    text.push_str(PROXIMITY_LIMITATION);
+    text
 }
 
 #[cfg(test)]
@@ -676,16 +938,199 @@ mod tests {
         assert!(sequence_position(&b) < sequence_position(&a));
     }
 
+    fn neighbor<'a>(
+        id: &'a str,
+        time: Option<i64>,
+        operation: Option<&'a str>,
+    ) -> NeighborFacts<'a> {
+        NeighborFacts {
+            record_id: id,
+            event_time: time,
+            time_quality: TimeQuality::Observed,
+            dataset_id: "ds-1",
+            source_id: "src-1",
+            operation,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_neighborhood_can_never_be_more_than_probable() {
+        let rule = ProbableRule {
+            compatible_fields: vec![CompatibleField::Operation],
+            tolerance_nanos: 1_000,
+        };
+        rule.validate().unwrap();
+        let anchor = neighbor("r1", Some(10_000), Some("checkout"));
+        let near = neighbor("r2", Some(10_400), Some("checkout"));
+        let hit = evaluate_probable(&anchor, &near, &rule).unwrap();
+        assert_eq!(hit.confidence(), Confidence::Probable);
+        assert_eq!(hit.delta_nanos, 400);
+        assert_eq!(hit.matched_fields, ["operation"]);
+        // Originals are carried through, not just the delta.
+        assert_eq!(
+            (hit.anchor_event_time, hit.neighbor_event_time),
+            (10_000, 10_400)
+        );
+
+        // Even trace-identical records reached through this rule stay
+        // Probable: the rule is proximity, so the answer is proximity.
+        let mut exact_twin = neighbor("r3", Some(10_100), Some("checkout"));
+        exact_twin.resource_id = Some("res-1");
+        assert_eq!(
+            evaluate_probable(&anchor, &exact_twin, &rule)
+                .unwrap()
+                .confidence(),
+            Confidence::Probable
+        );
+    }
+
+    #[test]
+    fn neighborhoods_reject_rather_than_widen() {
+        let rule = ProbableRule {
+            compatible_fields: vec![CompatibleField::Operation],
+            tolerance_nanos: 1_000,
+        };
+        let anchor = neighbor("r1", Some(10_000), Some("checkout"));
+        // Outside the window.
+        assert!(evaluate_probable(
+            &anchor,
+            &neighbor("r2", Some(11_001), Some("checkout")),
+            &rule
+        )
+        .is_none());
+        // Boundary is inclusive and symmetric.
+        assert!(evaluate_probable(
+            &anchor,
+            &neighbor("r2", Some(11_000), Some("checkout")),
+            &rule
+        )
+        .is_some());
+        assert!(evaluate_probable(
+            &anchor,
+            &neighbor("r2", Some(9_000), Some("checkout")),
+            &rule
+        )
+        .is_some());
+        // A required field the candidate does not carry is a rejection,
+        // not a wildcard.
+        assert!(evaluate_probable(&anchor, &neighbor("r2", Some(10_100), None), &rule).is_none());
+        // Different value: rejected.
+        assert!(evaluate_probable(
+            &anchor,
+            &neighbor("r2", Some(10_100), Some("refund")),
+            &rule
+        )
+        .is_none());
+        // Undated records have no distance and never join.
+        assert!(
+            evaluate_probable(&anchor, &neighbor("r2", None, Some("checkout")), &rule).is_none()
+        );
+        let undated_anchor = neighbor("r1", None, Some("checkout"));
+        assert!(evaluate_probable(
+            &undated_anchor,
+            &neighbor("r2", Some(10_000), Some("checkout")),
+            &rule
+        )
+        .is_none());
+        // The anchor is not its own neighbour.
+        assert!(evaluate_probable(&anchor, &anchor, &rule).is_none());
+    }
+
+    #[test]
+    fn proximity_alone_is_allowed_but_says_so() {
+        let rule = ProbableRule {
+            compatible_fields: vec![],
+            tolerance_nanos: 500,
+        };
+        rule.validate().unwrap();
+        let anchor = neighbor("r1", Some(0), None);
+        let hit = evaluate_probable(&anchor, &neighbor("r2", Some(100), None), &rule).unwrap();
+        assert!(hit.matched_fields.is_empty());
+        assert_eq!(hit.confidence(), Confidence::Probable);
+        assert!(rule.describe_constraints().contains("time proximity alone"));
+
+        let text = explain_neighborhood(&rule, "r1", TimeQuality::Observed, 1, 0);
+        assert!(text.starts_with("Probable ("));
+        assert!(text.contains("time proximity alone"));
+        assert!(text.contains(INVESTIGATIVE_LEAD));
+        assert!(text.contains("not thereby related"));
+        assert!(text.contains("quality: observed"));
+    }
+
+    #[test]
+    fn neighborhood_ordering_drops_the_least_relevant_first() {
+        let rule = ProbableRule {
+            compatible_fields: vec![],
+            tolerance_nanos: 10_000,
+        };
+        let anchor = neighbor("r0", Some(1_000), None);
+        let mut hits: Vec<_> = [("r3", 9_000i64), ("r1", 1_100), ("r2", 800)]
+            .iter()
+            .map(|(id, t)| {
+                evaluate_probable(&anchor, &neighbor(id, Some(*t), None), &rule).unwrap()
+            })
+            .collect();
+        hits.sort_by(|a, b| neighbor_order(a).cmp(&neighbor_order(b)));
+        // Nearest in absolute time first, regardless of direction.
+        assert_eq!(
+            hits.iter()
+                .map(|h| h.record_id.as_str())
+                .collect::<Vec<_>>(),
+            ["r1", "r2", "r3"]
+        );
+        assert_eq!(hits[0].delta_nanos, 100);
+        assert_eq!(hits[1].delta_nanos, -200);
+
+        let text = explain_neighborhood(&rule, "r0", TimeQuality::Inferred, 2, 1);
+        assert!(text.contains("1 further record(s)"));
+        assert!(text.contains("nearest first"));
+        assert!(text.contains("quality: inferred"));
+    }
+
+    #[test]
+    fn neighborhood_rules_refuse_degenerate_configuration() {
+        let zero = ProbableRule {
+            compatible_fields: vec![],
+            tolerance_nanos: 0,
+        };
+        assert!(zero
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("no width"));
+        let duplicated = ProbableRule {
+            compatible_fields: vec![CompatibleField::Operation, CompatibleField::Operation],
+            tolerance_nanos: 1,
+        };
+        assert!(duplicated
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("twice"));
+        assert!(CompatibleField::parse("message").is_err());
+        for name in COMPATIBLE_FIELDS {
+            assert_eq!(CompatibleField::parse(name).unwrap().as_str(), *name);
+        }
+    }
+
     #[test]
     fn limits_are_bounded_and_refuse_meaningless_values() {
         let d = CorrelationLimits::default();
         assert_eq!(d.min_group_size, 2);
         assert_eq!(d.max_events_per_group, 256);
         assert_eq!(d.max_groups, 10_000);
+        assert_eq!(d.max_total_signals, 250_000);
         assert_eq!(CorrelationLimits::parse("{}").unwrap(), d);
         let custom = CorrelationLimits::parse("{\"max_groups\":5}").unwrap();
         assert_eq!(custom.max_groups, 5);
         assert_eq!(custom.min_group_size, d.min_group_size);
+        // Signals are budgeted apart from edges.
+        let split = CorrelationLimits::parse("{\"max_total_signals\":7}").unwrap();
+        assert_eq!(
+            (split.max_total_signals, split.max_total_edges),
+            (7, 250_000)
+        );
         assert!(CorrelationLimits::parse("{\"min_group_size\":1}").is_err());
         assert!(CorrelationLimits::parse("{\"surprise\":1}").is_err());
         assert!(CorrelationLimits::parse("[]").is_err());

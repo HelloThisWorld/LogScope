@@ -12,6 +12,7 @@ pub mod comparison;
 pub mod correlation;
 pub mod envelope;
 pub mod ids;
+pub mod signals;
 pub mod stack;
 pub mod template;
 pub mod vocab;
