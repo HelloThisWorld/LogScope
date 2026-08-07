@@ -582,6 +582,48 @@ export const api = {
     side: "baseline" | "suspect",
     limit: number,
   ) => invoke<LogRowV2Dto[]>("comparison_records", { runId, key, side, limit }),
+
+  // ---- v0.4 correlation ----
+  createCorrelationDefinition: (dto: NewCorrelationDefinitionDto) =>
+    invoke<AnalysisDefinitionDto>("create_correlation_definition", { new: dto }),
+  startCorrelationAnalysis: (definitionId: string) =>
+    invoke<AnalysisStartedDto>("start_correlation_analysis", { definitionId }),
+  listCorrelationGroups: (runId: string, offset: number, limit: number) =>
+    invoke<CorrelationGroupDto[]>("list_correlation_groups", {
+      runId,
+      offset,
+      limit,
+    }),
+  listCorrelationEdges: (runId: string, groupId: string, limit: number) =>
+    invoke<CorrelationEdgeDto[]>("list_correlation_edges", {
+      runId,
+      groupId,
+      limit,
+    }),
+  listCorrelationSignals: (runId: string, groupId: string, limit: number) =>
+    invoke<CorrelationSignalDto[]>("list_correlation_signals", {
+      runId,
+      groupId,
+      limit,
+    }),
+  correlationRecords: (runId: string, groupId: string, limit: number) =>
+    invoke<LogRowV2Dto[]>("correlation_records", { runId, groupId, limit }),
+  probableNeighborhood: (
+    runId: string,
+    anchorRecordId: string,
+    compatibleFields: string[],
+    // A duration, not an absolute time: 2^53 ns is ~104 days, so this
+    // stays a number while epoch-nanosecond values remain bigint.
+    toleranceNanos: number,
+    maxNeighbors: number,
+  ) =>
+    invoke<ProbableNeighborhoodDto>("probable_neighborhood", {
+      runId,
+      anchorRecordId,
+      compatibleFields,
+      toleranceNanos,
+      maxNeighbors,
+    }),
 };
 
 // ---- v0.4 pattern analysis types --------------------------------------
@@ -593,6 +635,12 @@ import type { AnalysisStartedDto } from "./bindings/AnalysisStartedDto";
 import type { PatternSummaryDto } from "./bindings/PatternSummaryDto";
 import type { NewComparisonDefinitionDto } from "./bindings/NewComparisonDefinitionDto";
 import type { ComparisonResultDto } from "./bindings/ComparisonResultDto";
+import type { NewCorrelationDefinitionDto } from "./bindings/NewCorrelationDefinitionDto";
+import type { CorrelationGroupDto } from "./bindings/CorrelationGroupDto";
+import type { CorrelationEdgeDto } from "./bindings/CorrelationEdgeDto";
+import type { CorrelationSignalDto } from "./bindings/CorrelationSignalDto";
+import type { ProbableNeighborhoodDto } from "./bindings/ProbableNeighborhoodDto";
+import type { ProbableNeighborDto } from "./bindings/ProbableNeighborDto";
 
 export type {
   AnalysisDefinitionDto,
@@ -602,5 +650,11 @@ export type {
   PatternSummaryDto,
   NewComparisonDefinitionDto,
   ComparisonResultDto,
+  NewCorrelationDefinitionDto,
+  CorrelationGroupDto,
+  CorrelationEdgeDto,
+  CorrelationSignalDto,
+  ProbableNeighborhoodDto,
+  ProbableNeighborDto,
 };
 export type { AnalysisFinishedDto } from "./bindings/AnalysisFinishedDto";

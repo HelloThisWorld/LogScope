@@ -432,7 +432,14 @@ fn main() {
             analysis_cmds::create_comparison_definition,
             analysis_cmds::start_comparison_analysis,
             analysis_cmds::list_comparison_results,
-            analysis_cmds::comparison_records
+            analysis_cmds::comparison_records,
+            analysis_cmds::create_correlation_definition,
+            analysis_cmds::start_correlation_analysis,
+            analysis_cmds::list_correlation_groups,
+            analysis_cmds::list_correlation_edges,
+            analysis_cmds::list_correlation_signals,
+            analysis_cmds::correlation_records,
+            analysis_cmds::probable_neighborhood
         ])
         .run(tauri::generate_context!())
         .expect("error while running LogScope");
