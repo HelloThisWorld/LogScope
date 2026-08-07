@@ -95,6 +95,7 @@ jobs:
         working-directory: apps/desktop
         run: |
           npm ci
+          npm run check:contrast
           npm run build
       - name: Desktop shell build smoke
         # Debug build, not check: linking is where WebView2 and the
