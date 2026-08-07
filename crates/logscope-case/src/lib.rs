@@ -11,6 +11,7 @@ pub mod analysis;
 pub mod comparison;
 pub mod correlation;
 pub mod envelope;
+pub mod findings;
 pub mod ids;
 pub mod signals;
 pub mod stack;
